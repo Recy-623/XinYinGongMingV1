@@ -1,0 +1,500 @@
+/* 全局基础重置与大小自适应、严禁边缘拖拽 */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    user-select: none;
+}
+
+input, textarea, .msg-bubble {
+    user-select: text !important; 
+}
+
+body, html {
+    width: 100vw;
+    height: 100vh;
+    background-color: #eddcd2; 
+    color: #333;
+    overflow: hidden;
+}
+
+.view-container {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.hidden {
+    display: none !important;
+}
+
+/* ================= 全局控制页 ================= */
+#portal-view {
+    background-color: #eddcd2;
+}
+
+.portal-card {
+    background: #f5ebe0;
+    padding: 40px;
+    border-radius: 16px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.08);
+    width: 480px;
+    max-width: 90%;
+}
+
+.portal-card h1 {
+    font-size: 26px;
+    margin-bottom: 6px;
+    text-align: center;
+    color: #4a3e3d;
+}
+
+.portal-card .subtitle {
+    text-align: center;
+    font-size: 14px;
+    color: #8a7a78;
+    margin-bottom: 30px;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 18px;
+}
+
+.form-group label {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #5c4d4c;
+}
+
+.form-row {
+    display: flex;
+    gap: 15px;
+}
+
+.form-row .form-group {
+    flex: 1;
+}
+
+/* 头像组合输入框控制 */
+.avatar-upload-box {
+    display: flex;
+    gap: 8px;
+}
+
+input[type="text"], select, textarea {
+    width: 100%;
+    padding: 10px 14px;
+    border: 1px solid #d5bdaf;
+    border-radius: 8px;
+    background-color: #fff;
+    font-size: 14px;
+    color: #333;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+input[type="text"]:focus, select:focus, textarea:focus {
+    border-color: #8338ec;
+}
+
+.slider-header {
+    display: flex;
+    justify-content: space-between;
+}
+
+.switch-group {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 46px;
+    height: 24px;
+}
+.switch input { opacity: 0; width: 0; height: 0; }
+
+.slider.round {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-color: #ccc;
+    transition: .3s;
+    border-radius: 24px;
+}
+.slider.round:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: .3s;
+    border-radius: 50%;
+}
+input:checked + .slider { background-color: #95ec69; }
+input:checked + .slider:before { transform: translateX(22px); }
+
+.btn-primary {
+    width: 100%;
+    padding: 12px;
+    background-color: #8338ec;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.btn-primary:hover { background-color: #722ede; }
+
+.btn-primary-sm {
+    padding: 8px 18px;
+    background-color: #07c160;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.btn-secondary {
+    padding: 8px 12px;
+    background-color: #e3d5ca;
+    border: 1px solid #d5bdaf;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    color: #4a3e3d;
+}
+.btn-secondary:hover { background-color: #d5bdaf; }
+
+.btn-secondary-sm {
+    padding: 0 12px;
+    background-color: #e3d5ca;
+    border: 1px solid #d5bdaf;
+    border-radius: 8px;
+    font-size: 13px;
+    cursor: pointer;
+    color: #4a3e3d;
+    white-space: nowrap;
+}
+.btn-secondary-sm:hover { background-color: #d5bdaf; }
+
+
+/* ================= 类微信双栏自适应布局 ================= */
+.workspace-layout {
+    display: flex;
+    width: 100vw;
+    height: 100vh;
+    background-color: #f5ebe0;
+    overflow: hidden;
+}
+
+.chat-sidebar {
+    width: 280px;
+    min-width: 280px;
+    max-width: 280px;
+    height: 100%;
+    border-right: 1px solid #e3d5ca;
+    background-color: #eae3db;
+    display: flex;
+    flex-direction: column;
+}
+
+.sidebar-header {
+    padding: 14px;
+    border-bottom: 1px solid #dfd7ce;
+}
+
+.btn-new {
+    width: 100%;
+    padding: 9px;
+    background-color: #f5ebe0;
+    border: 1px solid #d5bdaf;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.chat-list-ul {
+    list-style: none;
+    flex: 1;
+    overflow-y: auto;
+}
+
+.chat-item {
+    display: flex;
+    align-items: center;
+    padding: 14px 12px;
+    cursor: pointer;
+    position: relative;
+    border-bottom: 1px solid rgba(213, 189, 175, 0.3);
+}
+.chat-item:hover { background-color: #dfd7ce; }
+.chat-item.active { background-color: #eddcd2; }
+
+/* 头像框核心，完美兼容 Base64 本地图片裁剪缩放 */
+.avatar {
+    width: 42px;
+    height: 42px;
+    border-radius: 6px;
+    background-color: #d5bdaf;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-weight: bold;
+    color: #fff;
+    font-size: 16px;
+    overflow: hidden;
+    object-fit: cover; /* 保证本地图片不被拉伸变形 */
+    flex-shrink: 0;
+}
+
+/* 默认左侧角色列表里头像和文本间距为 12px */
+.chat-sidebar .avatar {
+    margin-right: 12px;
+}
+
+.chat-item-info {
+    flex: 1;
+    overflow: hidden;
+}
+
+.chat-item-name {
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: 5px;
+    color: #222;
+}
+
+.chat-item-preview {
+    font-size: 12px;
+    color: #8a7a78;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.btn-delete-chat {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: #999;
+    font-size: 18px;
+    cursor: pointer;
+    display: none;
+}
+.chat-item:hover .btn-delete-chat { display: block; }
+.btn-delete-chat:hover { color: #ff4d4f; }
+
+.chat-main {
+    flex: 1;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    background-color: #f5ebe0;
+}
+
+.chat-header {
+    height: 60px;
+    min-height: 60px;
+    padding: 0 20px;
+    border-bottom: 1px solid #e3d5ca;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #f5ebe0;
+}
+
+#current-chat-name {
+    font-size: 16px;
+    font-weight: bold;
+    color: #333;
+}
+
+.shortcut-bar {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.btn-text {
+    background: none;
+    border: none;
+    font-size: 13px;
+    color: #666;
+    cursor: pointer;
+}
+.btn-text:hover { color: #8338ec; }
+.btn-text.warning:hover { color: #ff4d4f; }
+
+.btn-action {
+    padding: 6px 12px;
+    background-color: #e3d5ca;
+    border: 1px solid #d5bdaf;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.chat-messages-area {
+    flex: 1;
+    padding: 20px;
+    overflow-y: auto;
+    background-color: #f5ebe0;
+}
+
+.msg-row {
+    display: flex;
+    margin-bottom: 16px;
+    align-items: flex-start;
+}
+
+/* ================= 核心需求①：对齐两边对话和头像的间隔 ================= */
+/* 1. AI 消息行（靠左）：头像在左，包装盒在右，间距 12px */
+.ai-row .avatar {
+    margin-right: 12px; 
+}
+
+/* 2. 用户消息行（靠右）：利用 row-reverse 反转后，头像在右，包装盒在左 */
+.msg-row.user-row {
+    flex-direction: row-reverse; 
+}
+/* 此时反转后，用户头像的左边面向气泡包装盒，设置左边距为 12px，两边中间间距完美对称相同 */
+.user-row .avatar {
+    margin-left: 12px; 
+    margin-right: 0px; /* 清空可能继承的右边距 */
+}
+
+.msg-wrapper {
+    max-width: 70%;
+    display: flex;
+    flex-direction: column;
+}
+.user-row .msg-wrapper {
+    align-items: flex-end;
+}
+
+.msg-meta {
+    font-size: 11px;
+    color: #8a7a78;
+    margin-bottom: 4px;
+    padding: 0 4px;
+}
+
+.msg-bubble {
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 14px;
+    line-height: 1.5;
+    word-break: break-word;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+
+.ai-row .msg-bubble {
+    background-color: #ffffff;
+    color: #333;
+    border-top-left-radius: 0;
+}
+
+.user-row .msg-bubble {
+    background-color: #95ec69;
+    color: #000;
+    border-top-right-radius: 0;
+}
+
+.chat-footer {
+    padding: 15px 20px;
+    background-color: #f5ebe0;
+    border-top: 1px solid #e3d5ca;
+}
+
+#chat-input {
+    width: 100%;
+    height: 75px;
+    resize: none; 
+    border: 1px solid #d5bdaf;
+    border-radius: 6px;
+    padding: 10px;
+    font-size: 14px;
+    background-color: #fff;
+    outline: none;
+}
+
+.footer-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 8px;
+}
+
+/* ================= 弹窗样式 ================= */
+.modal-overlay {
+    position: fixed;
+    top: 0; left: 0; width: 100vw; height: 100vh;
+    background-color: rgba(0,0,0,0.4);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.modal-content {
+    background-color: #f5ebe0;
+    padding: 25px;
+    border-radius: 12px;
+    width: 530px;
+    max-width: 90%;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.15);
+}
+
+.modal-content h2 {
+    font-size: 18px;
+    margin-bottom: 15px;
+    color: #4a3e3d;
+}
+
+.sub-fieldset {
+    border: 1px solid #d5bdaf;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 15px;
+}
+.sub-fieldset legend {
+    font-size: 12px;
+    padding: 0 6px;
+    color: #8a7a78;
+    font-weight: bold;
+}
+
+.data-transfer-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.animate-fade-in {
+    animation: fadeIn 0.2s ease-out forwards;
+}
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}

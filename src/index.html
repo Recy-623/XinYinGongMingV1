@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>心印共鸣 - 第三版深度重构</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+    <div id="portal-view" class="view-container">
+        <div class="portal-card">
+            <h1>心印共鸣</h1>
+            <p class="subtitle">纯前端本地 AI 虚拟伴侣系统</p>
+            
+            <div class="form-group">
+                <label for="global-model">AI 模型选择</label>
+                <select id="global-model">
+                    <option value="">正在获取本地模型...</option>
+                </select>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="global-username">我的默认称呼</label>
+                    <input type="text" id="global-username" placeholder="默认：韫欢欢">
+                </div>
+                <div class="form-group">
+                    <label for="global-avatar">我的默认头像</label>
+                    <div class="avatar-upload-box">
+                        <input type="text" id="global-avatar" placeholder="单字、URL 或点击右侧上传">
+                        <button id="btn-upload-global-avatar" class="btn-secondary-sm">上传图片</button>
+                        <input type="file" id="input-global-avatar-file" accept="image/*" class="hidden">
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <div class="slider-header">
+                    <label for="global-context-limit">上下文记忆限制 (条)</label>
+                    <span id="context-val">20</span>
+                </div>
+                <input type="range" id="global-context-limit" min="0" max="200" value="20">
+            </div>
+
+            <div class="form-group switch-group">
+                <label for="global-stream">流式传输控制 (打字机效果)</label>
+                <label class="switch">
+                    <input type="checkbox" id="global-stream" checked>
+                    <span class="slider round"></span>
+                </label>
+            </div>
+
+            <button id="btn-enter-system" class="btn-primary">进入心印共鸣</button>
+        </div>
+    </div>
+
+    <div id="workspace-view" class="view-container hidden">
+        <div class="workspace-layout">
+            
+            <div class="chat-sidebar">
+                <div class="sidebar-header">
+                    <button id="btn-new-chat" class="btn-new">+ 新建会话</button>
+                </div>
+                <ul id="chat-list" class="chat-list-ul">
+                    </ul>
+            </div>
+
+            <div class="chat-main">
+                <div class="chat-header">
+                    <div class="active-character-info">
+                        <span id="current-chat-name">新伴侣</span>
+                    </div>
+                    <div class="shortcut-bar">
+                        <button id="btn-exit-portal" class="btn-text">退出共鸣</button>
+                        <button id="btn-clear-history" class="btn-text warning">清空记忆</button>
+                        <button id="btn-open-config" class="btn-action">伴侣配置</button>
+                    </div>
+                </div>
+
+                <div id="chat-messages" class="chat-messages-area">
+                    </div>
+
+                <div class="chat-footer">
+                    <textarea id="chat-input" placeholder="输入消息，按下 Enter 发送，Shift + Enter 换行..."></textarea>
+                    <div class="footer-actions">
+                        <button id="btn-send" class="btn-primary-sm">发送</button>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <div id="config-modal" class="modal-overlay hidden">
+        <div class="modal-content animate-fade-in">
+            <h2>伴侣深度配置</h2>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="modal-char-name">伴侣名称</label>
+                    <input type="text" id="modal-char-name">
+                </div>
+                <div class="form-group">
+                    <label for="modal-char-avatar">伴侣头像</label>
+                    <div class="avatar-upload-box">
+                        <input type="text" id="modal-char-avatar">
+                        <button id="btn-upload-char-avatar" class="btn-secondary-sm">上传图片</button>
+                        <input type="file" id="input-char-avatar-file" accept="image/*" class="hidden">
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="modal-system-prompt">核心人设 (System Prompt)</label>
+                <textarea id="modal-system-prompt" rows="5" placeholder="定义 AI 的性格、行为逻辑和身份背景..."></textarea>
+            </div>
+
+            <fieldset class="sub-fieldset">
+                <legend>专属独立身份 (留空则继承全局默认值)</legend>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="modal-custom-name">在此频道我的称呼</label>
+                        <input type="text" id="modal-custom-name">
+                    </div>
+                    <div class="form-group">
+                        <label for="modal-custom-avatar">在此频道我的头像</label>
+                        <div class="avatar-upload-box">
+                            <input type="text" id="modal-custom-avatar">
+                            <button id="btn-upload-custom-avatar" class="btn-secondary-sm">上传图片</button>
+                            <input type="file" id="input-custom-avatar-file" accept="image/*" class="hidden">
+                        </div>
+                    </div>
+                </div>
+            </fieldset>
+
+            <div class="data-transfer-row">
+                <button id="btn-export-prompt" class="btn-secondary">导出核心设定 (.txt)</button>
+                <button id="btn-trigger-import" class="btn-secondary">导入核心设定 (.txt)</button>
+                <input type="file" id="import-file-input" accept=".txt" class="hidden">
+            </div>
+
+            <div class="modal-footer">
+                <button id="btn-save-config" class="btn-primary">固化并应用</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="main.js"></script>
+</body>
+</html>
