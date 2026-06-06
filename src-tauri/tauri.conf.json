@@ -1,5 +1,5 @@
 {
-  "$schema": "https://schema.tauri.app/config/2",
+  "$schema": "./target/schema.json",
   "version": "0.1.0",
   "identifier": "com.xinying.gongming",
   "productName": "心印共鸣",

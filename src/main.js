@@ -1,641 +1,477 @@
-/**
- * 心印共鸣系统核心数据处理与交互逻辑层 - v2.1 
- * 升级特性：① 运行中模型一键探测与动态刷新 ② 聊天记录及系统全量配置无损导入导出（迁移）
- */
+// ==========================================
+// 心印共鸣 v3.0 跨云端架构引擎核心线程（工业防死锁版）
+// 严格执行个人隐私红线：默认代称为通用"用户"与"我"
+// ==========================================
 
-// 1. 全局核心状态机
+// 1. 全局系统状态机
 let state = {
     globals: {
         userName: "用户",
         userAvatar: "我",
-        contextLimit: 20,
-        streamEnabled: true,
+        selectedProvider: "ollama",
+        cloudApiUrl: "",
         selectedModel: ""
     },
-    characters: [], 
-    activeId: null, 
-    models: []      
+    characters: [
+        {
+            id: "char_01",
+            name: "希露菲",
+            avatar: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' fill='%238b5cf6'><circle cx='50' cy='50' r='50'/><text x='50' y='55' font-size='30' fill='white' text-anchor='middle'>🧚</text></svg>",
+            systemPrompt: "你叫希露菲，是一个温柔体贴、容易害羞的森林精灵。你对用户极度信任、有着朦胧的爱意。说话喜欢使用‘……’，语气柔软内敛。绝对不能暴露自己是AI大模型。",
+            history: []
+        },
+        {
+            id: "char_02",
+            name: "雷恩大佐",
+            avatar: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' fill='%23374151'><circle cx='50' cy='50' r='50'/><text x='50' y='55' font-size='30' fill='white' text-anchor='middle'>⚔️</text></svg>",
+            systemPrompt: "你是雷恩大佐，一位经历过无数次战火洗礼的冷酷帝国军人。性格沉稳、不苟言笑、铁血果断，但唯独对用户有着极其坚定的守护克制。回话简短，绝不拖泥带水。",
+            history: []
+        }
+    ],
+    activeCharacterId: "char_01"
 };
 
-// 2. 本地持久化加载与初始化
-function initSystem() {
-    state.globals.userName = localStorage.getItem("user-name") || "用户";
-    state.globals.userAvatar = localStorage.getItem("user-avatar") || "我";
+// 2. 核心控制函数直接绑定至最高域 window
+window.toggleApiProviderFields = function() {
+    const providerSelect = document.getElementById("api-provider-select");
+    if (!providerSelect) return;
     
-    let localLimit = localStorage.getItem("context-limit");
-    state.globals.contextLimit = localLimit !== null ? parseInt(localLimit, 10) : 20;
-    if(isNaN(state.globals.contextLimit) || state.globals.contextLimit < 0) {
-        state.globals.contextLimit = 20;
-    }
-
-    state.globals.streamEnabled = localStorage.getItem("stream-enabled") !== "false";
-    state.globals.selectedModel = localStorage.getItem("selected-model") || "";
-
-    let localChars = localStorage.getItem("characters");
-    if (localChars) {
-        state.characters = JSON.parse(localChars);
-    } else {
-        state.characters = [{
-            id: Date.now(),
-            name: "新伴侣",
-            avatar: "新",
-            systemPrompt: "你是一个温柔贴心的AI虚拟伴侣，会时刻聆听并感应主人的内心，用温柔细腻的话语给予回应。",
-            customUserName: "",
-            customUserAvatar: "",
-            history: []
-        }];
-        saveCharactersToStorage();
-    }
-    state.activeId = state.characters[0].id;
-
-    // 数据同步至入口UI
-    document.getElementById("global-username").value = state.globals.userName;
-    document.getElementById("global-avatar").value = state.globals.userAvatar;
-    document.getElementById("global-context-limit").value = state.globals.contextLimit;
-    document.getElementById("context-val").innerText = state.globals.contextLimit;
-    document.getElementById("global-stream").checked = state.globals.streamEnabled;
-
-    fetchLocalOllamaModels();
-    renderChatList();
-}
-
-function saveGlobalsToStorage() {
-    localStorage.setItem("user-name", state.globals.userName);
-    localStorage.setItem("user-avatar", state.globals.userAvatar);
-    localStorage.setItem("context-limit", state.globals.contextLimit);
-    localStorage.setItem("stream-enabled", state.globals.streamEnabled);
-    localStorage.setItem("selected-model", state.globals.selectedModel);
-}
-
-function saveCharactersToStorage() {
-    localStorage.setItem("characters", JSON.stringify(state.characters));
-}
-
-// 3. 需求①：自动化与主动按键抓取本地 Ollama 服务模型
-async function fetchLocalOllamaModels(isManualRefresh = false) {
-    const modelSelect = document.getElementById("global-model");
-    const refreshBtn = document.getElementById("btn-refresh-models");
+    const provider = providerSelect.value;
+    state.globals.selectedProvider = provider;
     
-    if (isManualRefresh && refreshBtn) {
-        refreshBtn.innerText = "获取中...";
-        refreshBtn.disabled = true;
-    }
-
-    try {
-        const response = await fetch("http://localhost:11434/api/tags");
-        if (!response.ok) throw new Error("API响应失败");
-        const data = await response.json();
-        state.models = data.models || [];
-        
-        modelSelect.innerHTML = "";
-        if (state.models.length === 0) {
-            modelSelect.innerHTML = `<option value="">⚠️ 本地已启动但无安装模型</option>`;
+    const panel = document.getElementById("cloud-api-panel");
+    if (panel) {
+        if (provider === "openai") {
+            panel.classList.remove("hidden");
         } else {
-            state.models.forEach(m => {
-                let opt = document.createElement("option");
-                opt.value = m.name;
-                opt.innerText = m.name;
-                // 如果用户之前选过或者缓存过，保持选中状态
-                if (m.name === state.globals.selectedModel) {
-                    opt.selected = true;
-                }
-                modelSelect.appendChild(opt);
+            panel.classList.add("hidden");
+        }
+    }
+    
+    // 🚨 核心联动修复：当驱动提供商发生变更时，立刻清空上一次残留的错误模型
+    // 并根据新选择的通道，自动、静默地在后台刷新并重组可选的 AI 心智模组！
+    const select = document.getElementById("model-select");
+    if (select) {
+        select.innerHTML = "<option value=''>正在自适应同步驱动源...</option>";
+    }
+    
+    // 自动调用原有的刷新机制
+    window.refreshModels();
+    
+    localStorage.setItem("xinyingongming_v3_core", JSON.stringify(state));
+};
+
+window.refreshModels = async function() {
+    const btn = document.getElementById("refresh-models-btn");
+    const select = document.getElementById("model-select");
+    if (!btn || !select) return;
+
+    btn.innerText = "获取中...";
+    btn.disabled = true;
+    select.innerHTML = "";
+
+    const provider = state.globals.selectedProvider;
+
+    if (provider === "openai") {
+        const urlInput = document.getElementById("api-url-input");
+        const keyInput = document.getElementById("api-key-input");
+        
+        // 🚨 核心修正：每一次点击刷新/测试，都将当前输入框的值实时覆盖到沙箱中
+        // 如果用户改错了，沙箱里的正确密钥就会立刻被这张“错的纸”覆盖掉！
+        if (urlInput) state.globals.cloudApiUrl = urlInput.value.trim();
+        if (keyInput) localStorage.setItem("xinyingongming_secure_apikey", keyInput.value.trim());
+    }
+
+    if (provider === "ollama") {
+        try {
+            const res = await fetch("http://localhost:11434/api/tags");
+            const data = await res.json();
+            if (data.models && data.models.length > 0) {
+                data.models.forEach(m => {
+                    const opt = document.createElement("option");
+                    opt.value = m.name;
+                    opt.innerText = m.name;
+                    select.appendChild(opt);
+                });
+                if (state.globals.selectedModel) select.value = state.globals.selectedModel;
+                alert("🔄 Ollama 本地模型驱动同步刷新成功！");
+            } else {
+                const opt = document.createElement("option");
+                opt.value = "";
+                opt.innerText = "❌ 本地Ollama未检测到任何装载的模型";
+                select.appendChild(opt);
+            }
+        } catch (err) {
+            const opt = document.createElement("option");
+            opt.value = "";
+            opt.innerText = "❌ 未能发现本地Ollama服务，请确认其正常开启";
+            select.appendChild(opt);
+        }
+    } else if (provider === "openai") {
+        if (!state.globals.cloudApiUrl) {
+            const opt = document.createElement("option");
+            opt.value = "";
+            opt.innerText = "⚠️ 请先填写API Base URL地址";
+            select.appendChild(opt);
+        } else {
+            // 🚨 核心修正：如果是云端 API，不要直接默认“就绪”
+            // 如果刚刚输入框被改动了，需要提醒用户进行测试联通
+            const cloudModels = ["deepseek-chat", "deepseek-reasoner", "gpt-4o", "gpt-3.5-turbo"];
+            cloudModels.forEach(m => {
+                const opt = document.createElement("option");
+                opt.value = m;
+                opt.innerText = m;
+                select.appendChild(opt);
             });
-
-            // 如果当前无选择，默认勾选第一个
-            if(!modelSelect.value && state.models.length > 0) {
-                state.globals.selectedModel = state.models[0].name;
-                saveGlobalsToStorage();
-            }
-        }
-        if (isManualRefresh) alert("🔄 Ollama 服务连接成功！已同步刷新最新模型状态。");
-    } catch (e) {
-        console.error(e);
-        modelSelect.innerHTML = `<option value="">❌ 未能发现本地Ollama服务</option>`;
-        if (isManualRefresh) alert("❌ 刷新失败：依然无法连接到本地 Ollama，请确认后端终端已成功开启。");
-    } finally {
-        if (isManualRefresh && refreshBtn) {
-            refreshBtn.innerText = "刷新";
-            refreshBtn.disabled = false;
+            
+            // 如果当前输入框的Key和测试成功存入的Key不一致，这里可以做预警
+            console.log("云端 API 载入备选心智模组。");
         }
     }
-}
+    
+    btn.innerText = "🔄 刷新";
+    btn.disabled = false;
+    localStorage.setItem("xinyingongming_v3_core", JSON.stringify(state));
+};
 
-// 4. 数据视图渲染层
-function renderChatList() {
-    const listContainer = document.getElementById("chat-list");
-    listContainer.innerHTML = "";
-
-    state.characters.forEach(char => {
-        const li = document.createElement("li");
-        li.className = `chat-item ${char.id === state.activeId ? 'active' : ''}`;
-        li.setAttribute("data-id", char.id);
-
-        let avatarHTML = isImageSource(char.avatar) 
-            ? `<img src="${char.avatar}" class="avatar">` 
-            : `<div class="avatar">${char.avatar.substring(0, 1)}</div>`;
-
-        let lastMsg = "暂无聊天记录";
-        if (char.history && char.history.length > 0) {
-            lastMsg = char.history[char.history.length - 1].content;
-        }
-
-        li.innerHTML = `
-            ${avatarHTML}
-            <div class="chat-item-info">
-                <div class="chat-item-name">${escapeHTML(char.name)}</div>
-                <div class="chat-item-preview">${escapeHTML(lastMsg)}</div>
-            </div>
-            <button class="btn-delete-chat" title="删除对话">&times;</button>
-        `;
-
-        li.addEventListener("click", (e) => {
-            if (e.target.classList.contains("btn-delete-chat")) return;
-            state.activeId = char.id;
-            renderChatList();
-            renderChatBox();
-        });
-
-        li.querySelector(".btn-delete-chat").addEventListener("click", (e) => {
-            e.stopPropagation();
-            if (state.characters.length <= 1) {
-                alert("系统限制：必须至少保留一个对话频道。");
-                return;
-            }
-            if (confirm(`确定要彻底清除与“${char.name}”的所有设定和历史记忆吗？`)) {
-                let index = state.characters.findIndex(c => c.id === char.id);
-                state.characters.splice(index, 1);
-                if (state.activeId === char.id) {
-                    state.activeId = state.characters[0].id;
-                }
-                saveCharactersToStorage();
-                renderChatList();
-                renderChatBox();
-            }
-        });
-
-        listContainer.appendChild(li);
-    });
-}
-
-function renderChatBox() {
-    const activeChar = state.characters.find(c => c.id === state.activeId);
-    if (!activeChar) return;
-
-    document.getElementById("current-chat-name").innerText = activeChar.name;
-    const msgContainer = document.getElementById("chat-messages");
-    msgContainer.innerHTML = "";
-
-    activeChar.history.forEach(msg => {
-        appendMessageBubble(msg.role, msg.content, activeChar);
-    });
-    scrollToBottom();
-}
-
-function appendMessageBubble(role, content, char, isPending = false) {
-    const msgContainer = document.getElementById("chat-messages");
-    const row = document.createElement("div");
-    row.className = `msg-row ${role === 'user' ? 'user-row' : 'ai-row'}`;
-    if (isPending) row.id = "pending-ai-bubble";
-
-    let displayName = "";
-    let displayAvatar = "";
-
-    if (role === 'user') {
-        displayName = char.customUserName || state.globals.userName || "用户";
-        let rawAvat = char.customUserAvatar || state.globals.userAvatar || "我";
-        displayAvatar = isImageSource(rawAvat) ? `<img src="${rawAvat}" class="avatar">` : `<div class="avatar">${rawAvat.substring(0,1)}</div>`;
-    } else {
-        displayName = char.name;
-        displayAvatar = isImageSource(char.avatar) ? `<img src="${char.avatar}" class="avatar">` : `<div class="avatar">${char.avatar.substring(0,1)}</div>`;
+window.enterChitChatView = function() {
+    const modelSelect = document.getElementById("model-select");
+    if (!modelSelect) return;
+    const modelValue = modelSelect.value;
+    
+    // 1. 基础校验：必须选择了一个模型
+    if (!modelValue || modelValue.startsWith("❌") || modelValue.startsWith("⚠️")) {
+        alert("🔒 契约唤醒失败：请先选择一个合法的 AI 大模型驱动心智！");
+        return;
     }
 
-    row.innerHTML = `
-        ${displayAvatar}
-        <div class="msg-wrapper">
-            <div class="msg-meta">${escapeHTML(displayName)}</div>
-            <div class="msg-bubble">${isPending ? content : parseLineBreaks(escapeHTML(content))}</div>
-        </div>
-    `;
-    msgContainer.appendChild(row);
-}
+    // 🚨 2. 核心防御拦截：如果是云端提供商，必须检查沙箱里有没有通过测试存储的合法Key
+    if (state.globals.selectedProvider === "openai") {
+        const secureKey = localStorage.getItem("xinyingongming_secure_apikey");
+        const currentInputKey = document.getElementById("api-key-input")?.value.trim();
 
-// 5. 对话流网络传输核心控制层
-async function handleSendMessage() {
-    const inputArea = document.getElementById("chat-input");
-    const text = inputArea.value.trim();
+        // 如果沙箱里没Key，或者用户改动了输入框导致当前输入的Key跟测试通过的Key对不上
+        if (!secureKey || secureKey !== currentInputKey) {
+            alert("🛑 契约阻断：检测到云端 API 密钥未经过正确连接测试，或已被篡改！\n\n请在当前页面重新点击【⚡ 测试云端连接】，通过验证后再进入。");
+            return; 
+        }
+    }
+
+    // 3. 校验通过，允许通行
+    state.globals.selectedModel = modelValue;
+    localStorage.setItem("xinyingongming_v3_core", JSON.stringify(state));
+
+    document.getElementById("portal-view").classList.remove("active");
+    document.getElementById("chitchat-view").classList.add("active");
+
+    syncChatSidebarList();
+    loadCharacterChatDialogue();
+    
+    // 🚨 4. 第二层防御：在进入聊天室后，双重确保输入框状态安全
+    window.checkChatInputStatus();
+};
+window.backToPortalView = function() {
+    document.getElementById("chitchat-view").classList.remove("active");
+    document.getElementById("portal-view").classList.add("active");
+    initPortalUi();
+};
+
+window.handleChatKeyDown = function(e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        window.sendChitChatMessage();
+    }
+};
+
+window.sendChitChatMessage = async function() {
+    const input = document.getElementById("chat-input-field");
+    if (!input) return;
+    const text = input.value.trim();
     if (!text) return;
 
-    const activeChar = state.characters.find(c => c.id === state.activeId);
-    if (!activeChar) return;
+    input.value = "";
+    appendChatBubble("user", text);
 
-    inputArea.value = "";
-    activeChar.history.push({ role: "user", content: text });
-    saveCharactersToStorage();
-    renderChatList(); 
-    appendMessageBubble("user", text, activeChar);
-    scrollToBottom();
+    const char = state.characters.find(c => c.id === state.activeCharacterId);
+    char.history.push({ role: "user", content: text });
+    localStorage.setItem("xinyingongming_v3_core", JSON.stringify(state));
 
-    appendMessageBubble("assistant", "正在聆听感应...", activeChar, true);
-    scrollToBottom();
+    const box = document.getElementById("chat-box");
+    const row = document.createElement("div");
+    row.className = "msg-row ai";
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    bubble.innerText = "⚡ 正在凝聚思绪...";
+    row.appendChild(bubble);
+    box.appendChild(row);
+    box.scrollTop = box.scrollHeight;
 
-    let payloadMessages = [{ role: "system", content: activeChar.systemPrompt }];
-    let limit = state.globals.contextLimit;
-    let slicedHistory = activeChar.history.slice(-limit);
-    payloadMessages = payloadMessages.concat(slicedHistory);
+    const provider = state.globals.selectedProvider;
+    const model = state.globals.selectedModel;
+    let messagesContext = [{ role: "system", content: char.systemPrompt }].concat(char.history);
 
-    const pendingBubble = document.getElementById("pending-ai-bubble");
+    if (provider === "ollama") {
+        try {
+            const response = await fetch("http://localhost:11434/api/chat", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ model: model, messages: messagesContext, stream: false })
+            });
+            const data = await response.json();
+            bubble.innerText = data.message.content;
+            char.history.push({ role: "assistant", content: data.message.content });
+            localStorage.setItem("xinyingongming_v3_core", JSON.stringify(state));
+        } catch (err) {
+            bubble.innerText = "❌ 精神共鸣断开：本地 Ollama 响应异常。";
+        }
+    } else if (provider === "openai") {
+        try {
+            const apiKey = localStorage.getItem("xinyingongming_secure_apikey") || "";
+            const response = await fetch(`${state.globals.cloudApiUrl}/chat/completions`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+                body: JSON.stringify({ model: model, messages: messagesContext, stream: false })
+            });
+            const data = await response.json();
+            if (data.choices && data.choices[0]) {
+                const reply = data.choices[0].message.content;
+                bubble.innerText = reply;
+                char.history.push({ role: "assistant", content: reply });
+                localStorage.setItem("xinyingongming_v3_core", JSON.stringify(state));
+            } else {
+                bubble.innerText = `❌ 云端返回异常：${JSON.stringify(data)}`;
+            }
+        } catch (err) {
+            bubble.innerText = "❌ 精神共鸣断开：云端 API 网络连接失败。";
+        }
+    }
+    box.scrollTop = box.scrollHeight;
+};
+
+window.openCharacterConfigModal = function() {
+    const char = state.characters.find(c => c.id === state.activeCharacterId);
+    document.getElementById("config-char-name").value = char.name;
+    document.getElementById("config-char-avatar-preview").src = char.avatar;
+    document.getElementById("config-char-prompt").value = char.systemPrompt;
+    document.getElementById("config-modal").classList.add("active");
+};
+
+window.closeCharacterConfigModal = function() {
+    document.getElementById("config-modal").classList.remove("active");
+};
+
+window.handleAvatarImageUpload = function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(evt) { document.getElementById("config-char-avatar-preview").src = evt.target.result; };
+    reader.readAsDataURL(file);
+};
+
+window.saveCharacterConfig = function() {
+    const char = state.characters.find(c => c.id === state.activeCharacterId);
+    char.name = document.getElementById("config-char-name").value.trim();
+    char.avatar = document.getElementById("config-char-avatar-preview").src;
+    char.systemPrompt = document.getElementById("config-char-prompt").value.trim();
+    localStorage.setItem("xinyingongming_v3_core", JSON.stringify(state));
+    window.closeCharacterConfigModal();
+    loadCharacterChatDialogue();
+};
+
+window.exportSingleCharacterCard = function() {
+    const char = state.characters.find(c => c.id === state.activeCharacterId);
+    const pureCard = { version: "xinyin-card-v3", name: char.name, avatar: char.avatar, systemPrompt: char.systemPrompt };
+    const blob = new Blob([JSON.stringify(pureCard, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `伴侣人设卡_${char.name}.json`; a.click();
+    URL.revokeObjectURL(url);
+};
+
+window.triggerSingleCardImport = function() { document.getElementById("single-card-import-file").click(); };
+
+window.handleSingleCardImport = function(e) {
+    const file = e.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(evt) {
+        try {
+            const card = JSON.parse(evt.target.result);
+            if (card.version === "xinyin-card-v3" && card.name && card.systemPrompt) {
+                const newId = `char_${Date.now()}`;
+                state.characters.push({ id: newId, name: `${card.name}(导入)`, avatar: card.avatar, systemPrompt: card.systemPrompt, history: [] });
+                state.activeCharacterId = newId;
+                localStorage.setItem("xinyingongming_v3_core", JSON.stringify(state));
+                alert(`🎉 成功载入外部伴侣：【${card.name}】！`);
+                window.closeCharacterConfigModal();
+                window.backToPortalView();
+            }
+        } catch (err) { alert("❌ 导入异常"); }
+    };
+    reader.readAsText(file);
+};
+
+window.triggerSystemExport = function() {
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `心印共鸣_全量数据备份.json`; a.click();
+};
+
+window.triggerSystemImport = function() { alert("恢复全量数据在第二阶段由Rust重写"); };
+
+// 初始化辅助函数
+function initPortalUi() {
+    const saved = localStorage.getItem("xinyingongming_v3_core");
+    if (saved) { try { const p = JSON.parse(saved); if (p.globals) state.globals = p.globals; if (p.characters) state.characters = p.characters; } catch (e) {} }
+    
+    document.getElementById("api-provider-select").value = state.globals.selectedProvider;
+    document.getElementById("api-url-input").value = state.globals.cloudApiUrl || "";
+    document.getElementById("api-key-input").value = localStorage.getItem("xinyingongming_secure_apikey") || "";
+    window.toggleApiProviderFields();
+    renderCharacterSelectors();
+}
+
+function renderCharacterSelectors() {
+    const grid = document.getElementById("character-selector-grid"); if (!grid) return;
+    grid.innerHTML = "";
+    state.characters.forEach(char => {
+        const card = document.createElement("div");
+        card.className = `char-select-card ${char.id === state.activeCharacterId ? 'selected' : ''}`;
+        card.onclick = () => { state.activeCharacterId = char.id; renderCharacterSelectors(); };
+        card.innerHTML = `<img src="${char.avatar}"><div>${char.name}</div>`;
+        grid.appendChild(card);
+    });
+}
+
+function syncChatSidebarList() {
+    const list = document.getElementById("sidebar-character-list"); if (!list) return;
+    list.innerHTML = "";
+    state.characters.forEach(char => {
+        const item = document.createElement("div");
+        item.className = `sidebar-item ${char.id === state.activeCharacterId ? 'active' : ''}`;
+        item.onclick = () => { state.activeCharacterId = char.id; syncChatSidebarList(); loadCharacterChatDialogue(); };
+        item.innerHTML = `<img src="${char.avatar}"><span>${char.name}</span>`;
+        list.appendChild(item);
+    });
+}
+
+function loadCharacterChatDialogue() {
+    const char = state.characters.find(c => c.id === state.activeCharacterId);
+    document.getElementById("chat-partner-avatar").src = char.avatar;
+    document.getElementById("chat-partner-name").innerText = char.name;
+    document.getElementById("chat-partner-status").innerText = `与 ${state.globals.selectedModel} 共鸣中`;
+    const box = document.getElementById("chat-box"); box.innerHTML = "";
+    if (char.history.length === 0) { appendChatBubble("ai", `（静静地看着你...）`); } 
+    else { char.history.forEach(msg => appendChatBubble(msg.role === "user" ? "user" : "ai", msg.content)); }
+    box.scrollTop = box.scrollHeight;
+}
+
+function appendChatBubble(role, content) {
+    const box = document.getElementById("chat-box"); if (!box) return;
+    const row = document.createElement("div"); row.className = `msg-row ${role}`;
+    row.innerHTML = `<div class="bubble">${content}</div>`; box.appendChild(row);
+    box.scrollTop = box.scrollHeight;
+}
+
+window.addEventListener("DOMContentLoaded", () => { initPortalUi(); setTimeout(() => { window.refreshModels(); }, 100); });
+
+// ==========================================
+// 🌐 核心扩展：云端 API 联通性高精度探测器
+// ==========================================
+window.testCloudConnection = async function() {
+    const btn = document.getElementById("test-cloud-btn");
+    const urlInput = document.getElementById("api-url-input");
+    const keyInput = document.getElementById("api-key-input");
+    
+    if (!btn || !urlInput || !keyInput) return;
+
+    let baseUrl = urlInput.value.trim();
+    const apiKey = keyInput.value.trim();
+
+    if (!baseUrl) {
+        alert("⚠️ 探测失败：请先填写 API Base URL 地址。");
+        return;
+    }
+    if (!apiKey) {
+        alert("⚠️ 探测失败：请先填写 API Key 密钥。");
+        return;
+    }
+
+    if (baseUrl.endsWith("/")) {
+        baseUrl = baseUrl.slice(0, -1);
+    }
+
+    btn.innerText = "正在握手探测...";
+    btn.disabled = true;
 
     try {
-        const response = await fetch("http://localhost:11434/api/chat", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                model: state.globals.selectedModel,
-                messages: payloadMessages,
-                stream: state.globals.streamEnabled
-            })
+        const response = await fetch(`${baseUrl}/models`, {
+            method: "GET",
+            headers: {
+                "Authorization": `Bearer ${apiKey}`,
+                "Content-Type": "application/json"
+            }
         });
 
-        if (!response.ok) throw new Error("网络连接失败");
-
-        if (state.globals.streamEnabled) {
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder("utf-8");
-            let aiResponseBuffer = "";
-            pendingBubble.querySelector(".msg-bubble").innerText = ""; 
-
-            let partialLine = "";
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                const chunk = decoder.decode(value, { stream: true });
-                const lines = (partialLine + chunk).split("\n");
-                partialLine = lines.pop(); 
-
-                for (let line of lines) {
-                    if (line.trim() === "") continue;
-                    try {
-                        const json = JSON.parse(line);
-                        if (json.message && json.message.content) {
-                            aiResponseBuffer += json.message.content;
-                            pendingBubble.querySelector(".msg-bubble").innerText = aiResponseBuffer;
-                            scrollToBottom();
-                        }
-                    } catch (err) {
-                        console.error("行流控解析异常", err);
-                    }
-                }
-            }
-
-            if (partialLine.trim() !== "") {
-                try {
-                    const json = JSON.parse(partialLine);
-                    if (json.message && json.message.content) {
-                        aiResponseBuffer += json.message.content;
-                        pendingBubble.querySelector(".msg-bubble").innerText = aiResponseBuffer;
-                    }
-                } catch(e){}
-            }
-
-            pendingBubble.removeAttribute("id");
-            activeChar.history.push({ role: "assistant", content: aiResponseBuffer });
-            saveCharactersToStorage();
-            renderChatList();
+        if (response.ok) {
+            // 🌟 只有真正 200 OK 握手成功，才锁死保存有效密钥
+            localStorage.setItem("xinyingongming_secure_apikey", apiKey);
+            state.globals.cloudApiUrl = baseUrl;
+            localStorage.setItem("xinyingongming_v3_core", JSON.stringify(state));
+            
+            alert("✅ 灵魂链接成功！云端 API 握手鉴权通过，模型驱动就绪。");
+            window.refreshModels();
         } else {
-            const data = await response.json();
-            let aiText = data.message ? data.message.content : "未收到有效感应。";
-            pendingBubble.querySelector(".msg-bubble").innerText = aiText;
-            pendingBubble.removeAttribute("id");
-            activeChar.history.push({ role: "assistant", content: aiText });
-            saveCharactersToStorage();
-            renderChatList();
-            scrollToBottom();
+            const errData = await response.json().catch(() => ({}));
+            
+            // 🚨 熔断：测试失败，立刻从底层沙箱中抹除任何历史有效密钥！
+            localStorage.removeItem("xinyingongming_secure_apikey");
+            
+            alert(`❌ 链接失败 (状态码: ${response.status})\n服务器反馈: ${JSON.stringify(errData)}`);
         }
-
-    } catch (error) {
-        console.error(error);
-        if (pendingBubble) {
-            pendingBubble.querySelector(".msg-bubble").innerHTML = `<span style="color:#ff4d4f;">💔 共鸣传输中断：请确认本地后端 Ollama 已正常启动。</span>`;
-            pendingBubble.removeAttribute("id");
-        }
+    } catch (err) {
+        console.error("网络层异常:", err);
+        // 🚨 熔断：发生阻断异常，同样立刻抹除密钥，防止卡Bug越权
+        localStorage.removeItem("xinyingongming_secure_apikey");
+        alert("❌ 连接遭遇阻断，已执行安全熔断。");
+    } finally {
+        btn.innerText = "⚡ 测试云端连接";
+        btn.disabled = false;
     }
-}
+};
+// ==========================================
+// 🛡️ 输入层熔断器：根据当前的连接状态，强行锁死或释放输入框
+// ==========================================
+window.checkChatInputStatus = function() {
+    const inputField = document.getElementById("chat-input-field");
+    const sendBtn = document.getElementById("chat-send-btn");
+    const statusEl = document.getElementById("chat-partner-status");
+    
+    if (!inputField || !sendBtn) return;
 
-// 6. 单一频道人设弹窗同步
-let openModalCharRef = null; 
-
-function openConfigModal() {
-    const activeChar = state.characters.find(c => c.id === state.activeId);
-    if (!activeChar) return;
-    openModalCharRef = activeChar;
-
-    document.getElementById("modal-char-name").value = activeChar.name;
-    document.getElementById("modal-char-avatar").value = activeChar.avatar;
-    document.getElementById("modal-system-prompt").value = activeChar.systemPrompt;
-    document.getElementById("modal-custom-name").value = activeChar.customUserName || "";
-    document.getElementById("modal-custom-avatar").value = activeChar.customUserAvatar || "";
-
-    document.getElementById("config-modal").classList.remove("hidden");
-}
-
-function closeConfigModal() {
-    document.getElementById("config-modal").classList.add("hidden");
-    openModalCharRef = null;
-}
-
-function bindLiveSyncListeners() {
-    document.getElementById("modal-char-name").addEventListener("input", (e) => {
-        if (openModalCharRef) {
-            openModalCharRef.name = e.target.value || "未命名";
-            renderChatList();
-            document.getElementById("current-chat-name").innerText = openModalCharRef.name;
-        }
-    });
-    document.getElementById("modal-char-avatar").addEventListener("input", (e) => {
-        if (openModalCharRef) {
-            openModalCharRef.avatar = e.target.value || "新";
-            renderChatList();
-        }
-    });
-    document.getElementById("modal-system-prompt").addEventListener("input", (e) => {
-        if (openModalCharRef) openModalCharRef.systemPrompt = e.target.value;
-    });
-    document.getElementById("modal-custom-name").addEventListener("input", (e) => {
-        if (openModalCharRef) openModalCharRef.customUserName = e.target.value;
-    });
-    document.getElementById("modal-custom-avatar").addEventListener("input", (e) => {
-        if (openModalCharRef) openModalCharRef.customUserAvatar = e.target.value;
-    });
-}
-
-function exportSystemPrompt() {
-    if (!openModalCharRef) return;
-    const blob = new Blob([openModalCharRef.systemPrompt], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${openModalCharRef.name}_核心设定.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
-}
-
-function importSystemPrompt(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        const text = e.target.result;
-        document.getElementById("modal-system-prompt").value = text;
-        if (openModalCharRef) {
-            openModalCharRef.systemPrompt = text;
-        }
-    };
-    reader.readAsText(file);
-    event.target.value = ""; 
-}
-
-// 7. 本地图片上传转 Base64 逻辑
-function handleImageUpload(fileInputId, targetInputId, callback) {
-    const fileInput = document.getElementById(fileInputId);
-    const targetInput = document.getElementById(targetInputId);
-    const file = fileInput.files[0];
-    if (!file) return;
-
-    if (file.size > 1.5 * 1024 * 1024) {
-        alert("为了本地流畅存储，请选择小于 1.5MB 的图片。");
-        fileInput.value = "";
-        return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        const base64Str = e.target.result;
-        targetInput.value = base64Str;
-        callback(base64Str);
-    };
-    reader.readAsDataURL(file);
-    fileInput.value = ""; 
-}
-
-// 8. 需求②：系统级全局快照导出（全量聊天记录与配置迁移）
-// 8. 需求②：系统级全局快照导出（全量聊天记录与配置迁移）
-function exportFullSystemData() {
-    // 聚合打包当前内存与持久化中的全量快照
-    const snapshot = {
-        version: "2.1-migration",
-        timestamp: Date.now(),
-        globals: state.globals,
-        characters: state.characters
-    };
-
-    const fileName = `心印共鸣_全量数据备份_${new Date().toLocaleDateString().replace(/\//g, '-')}.json`;
-
-    const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: "application/json;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = fileName;
-    a.click();
-    URL.revokeObjectURL(url);
-
-    // ✨ 新增：给玩家/用户的无缝暖心反馈弹窗
-    alert(
-        `💾 心印共鸣：全量数据备份成功！\n\n` +
-        `📦 备份文件名：${fileName}\n` +
-        `📍 存放路径：已触发系统下载，请前往您当前电脑/浏览器的【默认下载文件夹】(Downloads) 中查看并妥善保管该文件。`
-    );
-}
-// 8. 需求②：全量系统快照与聊天记录无损导入
-function importFullSystemData(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    if (!confirm("⚠️ 警告：导入全量备份将彻底覆盖当前电脑上的所有角色设定和历史聊天记录！是否确认覆盖？")) {
-        event.target.value = "";
-        return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        try {
-            const data = JSON.parse(e.target.result);
-            // 基础校验
-            if (!data.globals || !data.characters) {
-                throw new Error("配置文件格式不完整，缺失核心节点");
-            }
-
-            // 导入存入快照
-            state.globals = data.globals;
-            state.characters = data.characters;
-
-            // 深度写回本地浏览器 LocalStorage
-            saveGlobalsToStorage();
-            saveCharactersToStorage();
-
-            alert("🎉 全量聊天记录与系统人设数据已成功迁移导入！应用现在将自动刷新载入。");
-            window.location.reload(); // 一键原子重载界面
-        } catch (err) {
-            alert("❌ 导入失败：所选文件并不是合法的【心印共鸣】备份配置文件。");
-            console.error(err);
-        }
-    };
-    reader.readAsText(file);
-    event.target.value = "";
-}
-
-// 9. 全局与弹窗的事件绑定
-function bindSystemEvents() {
-    // 需求①：点击刷新按钮动态重新获取 Ollama 状态
-    document.getElementById("btn-refresh-models").addEventListener("click", () => {
-        fetchLocalOllamaModels(true);
-    });
-
-    // 需求②：全局全量数据迁移绑定
-    document.getElementById("btn-export-all-data").addEventListener("click", exportFullSystemData);
-    document.getElementById("btn-trigger-import-all").addEventListener("click", () => {
-        document.getElementById("import-all-file-input").click();
-    });
-    document.getElementById("import-all-file-input").addEventListener("change", importFullSystemData);
-
-    // 进入共鸣
-    document.getElementById("btn-enter-system").addEventListener("click", () => {
-        state.globals.userName = document.getElementById("global-username").value.trim() || "用户";
-        state.globals.userAvatar = document.getElementById("global-avatar").value.trim() || "我";
-        state.globals.selectedModel = document.getElementById("global-model").value;
-        state.globals.streamEnabled = document.getElementById("global-stream").checked;
+    if (state.globals.selectedProvider === "openai") {
+        const secureKey = localStorage.getItem("xinyingongming_secure_apikey");
         
-        let limitVal = parseInt(document.getElementById("global-context-limit").value, 10);
-        state.globals.contextLimit = (isNaN(limitVal) || limitVal < 0) ? 20 : limitVal;
-
-        saveGlobalsToStorage();
-        document.getElementById("portal-view").classList.add("hidden");
-        document.getElementById("workspace-view").classList.remove("hidden");
-        renderChatBox();
-    });
-
-    // 退出共鸣
-    document.getElementById("btn-exit-portal").addEventListener("click", () => {
-        document.getElementById("workspace-view").classList.add("hidden");
-        document.getElementById("portal-view").classList.remove("hidden");
-        fetchLocalOllamaModels(); 
-    });
-
-    // 记忆限制条滑动
-    document.getElementById("global-context-limit").addEventListener("input", (e) => {
-        document.getElementById("context-val").innerText = e.target.value;
-    });
-
-    // 新建卡片
-    document.getElementById("btn-new-chat").addEventListener("click", () => {
-        let newChar = {
-            id: Date.now(),
-            name: "新伴侣",
-            avatar: "新",
-            systemPrompt: "你是一个温柔贴心的AI虚拟伴侣，会时刻聆听并感应主人的内心，用温柔细腻的话语给予回应。",
-            customUserName: "",
-            customUserAvatar: "",
-            history: []
-        };
-        state.characters.push(newChar);
-        state.activeId = newChar.id;
-        saveCharactersToStorage();
-        renderChatList();
-        renderChatBox();
-    });
-
-    // 发送消息
-    document.getElementById("btn-send").addEventListener("click", handleSendMessage);
-    document.getElementById("chat-input").addEventListener("keydown", (e) => {
-        if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            handleSendMessage();
-        }
-    });
-
-    // 清空聊天记录
-    document.getElementById("btn-clear-history").addEventListener("click", () => {
-        const activeChar = state.characters.find(c => c.id === state.activeId);
-        if (!activeChar) return;
-        if (confirm(`确认要彻底清空与“${activeChar.name}”的历史聊天记录吗？(不可恢复)`)) {
-            activeChar.history = [];
-            saveCharactersToStorage();
-            renderChatList();
-            renderChatBox();
-        }
-    });
-
-    // 唤起和关闭弹窗
-    document.getElementById("btn-open-config").addEventListener("click", openConfigModal);
-    document.getElementById("btn-save-config").addEventListener("click", () => {
-        saveCharactersToStorage();
-        closeConfigModal();
-        renderChatBox(); 
-    });
-    document.getElementById("config-modal").addEventListener("click", (e) => {
-        if (e.target.id === "config-modal") closeConfigModal();
-    });
-
-    // 核心设定文件导入导出
-    document.getElementById("btn-export-prompt").addEventListener("click", exportSystemPrompt);
-    document.getElementById("btn-trigger-import").addEventListener("click", () => {
-        document.getElementById("import-file-input").click();
-    });
-    document.getElementById("import-file-input").addEventListener("change", importSystemPrompt);
-
-    // 头像上传事件监听
-    document.getElementById("btn-upload-global-avatar").addEventListener("click", () => {
-        document.getElementById("input-global-avatar-file").click();
-    });
-    document.getElementById("input-global-avatar-file").addEventListener("change", () => {
-        handleImageUpload("input-global-avatar-file", "global-avatar", (base64) => {
-            state.globals.userAvatar = base64;
-        });
-    });
-    document.getElementById("btn-upload-char-avatar").addEventListener("click", () => {
-        document.getElementById("input-char-avatar-file").click();
-    });
-    document.getElementById("input-char-avatar-file").addEventListener("change", () => {
-        handleImageUpload("input-char-avatar-file", "modal-char-avatar", (base64) => {
-            if (openModalCharRef) {
-                openModalCharRef.avatar = base64;
-                renderChatList(); 
+        // 再次兜底检查：如果由于任何未知 Bug 绕过了大门，只要这里没密钥，立刻物理锁死输入框
+        if (!secureKey) {
+            inputField.disabled = true;
+            inputField.value = "";
+            inputField.placeholder = "❌ 精神共鸣已彻底断开（API 认证失效，请返回主页重新测试连接）";
+            
+            if (sendBtn) sendBtn.disabled = true;
+            if (statusEl) {
+                statusEl.innerText = "断开连接";
+                statusEl.style.background = "#ef4444"; // 变红
             }
-        });
-    });
-    document.getElementById("btn-upload-custom-avatar").addEventListener("click", () => {
-        document.getElementById("input-custom-avatar-file").click();
-    });
-    document.getElementById("input-custom-avatar-file").addEventListener("change", () => {
-        handleImageUpload("input-custom-avatar-file", "modal-custom-avatar", (base64) => {
-            if (openModalCharRef) {
-                openModalCharRef.customUserAvatar = base64;
-            }
-        });
-    });
+            return;
+        }
+    }
 
-    bindLiveSyncListeners();
-}
-
-// 10. 底层工具防呆函数
-function isImageSource(str) {
-    if (!str) return false;
-    return str.startsWith("http://") || str.startsWith("https://") || str.startsWith("data:image");
-}
-function escapeHTML(str) {
-    if (!str) return "";
-    return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
-}
-function parseLineBreaks(str) {
-    return str.replace(/\n/g, "<br>");
-}
-function scrollToBottom() {
-    const msgContainer = document.getElementById("chat-messages");
-    msgContainer.scrollTop = msgContainer.scrollHeight;
-}
-
-window.addEventListener("DOMContentLoaded", () => {
-    initSystem();
-    bindSystemEvents();
-});
+    // 如果状态正常（Ollama 或 已验证的 OpenAI），则恢复正常输入状态
+    inputField.disabled = false;
+    inputField.placeholder = "对你的伴侣倾诉吧... (Enter发送，Shift+Enter换行)";
+    if (sendBtn) sendBtn.disabled = false;
+    if (statusEl) {
+        statusEl.style.background = ""; // 恢复默认颜色
+    }
+};

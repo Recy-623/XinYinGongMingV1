@@ -8,6 +8,8 @@ fn greet(name: &str) -> String {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init()) // 👈 新增：挂载对话框插件初始化
+        .plugin(tauri_plugin_fs::init())     // 👈 新增：挂载文件系统插件初始化
         .invoke_handler(tauri::generate_handler![greet])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

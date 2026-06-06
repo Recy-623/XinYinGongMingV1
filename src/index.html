@@ -3,160 +3,128 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>心印共鸣 - v2.1 动态迁移版</title>
+    <title>心印共鸣 - v3.0</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-
-    <div id="portal-view" class="view-container">
+    <div id="portal-view" class="view-container active">
         <div class="portal-card">
-            <h1>心印共鸣</h1>
-            <p class="subtitle">纯前端本地 AI 虚拟伴侣系统</p>
+            <h1>✨ 心印共鸣</h1>
+            <p class="subtitle">跨越数字鸿沟，重塑独属你的灵魂羁绊 (v3.0 跨云端版)</p>
             
-            <div class="form-group">
-                <label for="global-model">AI 模型选择</label>
-                <div class="model-select-box">
-                    <select id="global-model">
-                        <option value="">正在获取本地模型...</option>
+            <div class="control-group">
+                <label>🌐 大模型驱动提供商</label>
+                <select id="api-provider-select" onchange="toggleApiProviderFields()">
+                    <option value="ollama">本地 Ollama 服务 (免密本地生态)</option>
+                    <option value="openai">自定义 OpenAI / DeepSeek 兼容云端API</option>
+                </select>
+            </div>
+
+            <div id="cloud-api-panel" class="cloud-api-panel hidden">
+                <div class="control-group">
+                    <label>🔗 API Base URL (接口基础路径)</label>
+                    <input type="text" id="api-url-input" placeholder="例如: https://api.deepseek.com/v1">
+                </div>
+                <div class="control-group">
+                    <label>🔑 API Key (密钥 - 仅存于本机本地沙箱)</label>
+                    <input type="password" id="api-key-input" placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx">
+                </div>
+                <div class="control-group">
+                    <button id="test-cloud-btn" class="btn btn-secondary" onclick="testCloudConnection()" style="width: 100%; margin-top: 5px;">⚡ 测试云端连接</button>
+                </div>
+            </div>
+            
+            <div class="control-group">
+                <label>🤖 伴侣心智选择 (AI模型)</label>
+                <div class="model-refresh-wrapper">
+                    <select id="model-select">
+                        <option value="">正在检测/等待加载驱动源...</option>
                     </select>
-                    <button id="btn-refresh-models" class="btn-secondary-sm" title="刷新获取当前Ollama状态">刷新</button>
+                    <button id="refresh-models-btn" onclick="refreshModels()">🔄 刷新</button>
                 </div>
             </div>
 
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="global-username">我的默认称呼</label>
-                    <input type="text" id="global-username" placeholder="默认：用户">
-                </div>
-                <div class="form-group">
-                    <label for="global-avatar">我的默认头像</label>
-                    <div class="avatar-upload-box">
-                        <input type="text" id="global-avatar" placeholder="单字、URL 或点击右侧上传">
-                        <button id="btn-upload-global-avatar" class="btn-secondary-sm">上传</button>
-                        <input type="file" id="input-global-avatar-file" accept="image/*" class="hidden">
+            <div class="control-group">
+                <label>💞 选择共鸣的灵魂伴侣</label>
+                <div id="character-selector-grid" class="character-grid">
                     </div>
-                </div>
             </div>
 
-            <div class="form-group">
-                <div class="slider-header">
-                    <label for="global-context-limit">上下文记忆限制 (条)</label>
-                    <span id="context-val">20</span>
-                </div>
-                <input type="range" id="global-context-limit" min="0" max="200" value="20">
-            </div>
-
-            <div class="form-group switch-group">
-                <label for="global-stream">流式传输控制 (打字机效果)</label>
-                <label class="switch">
-                    <input type="checkbox" id="global-stream" checked>
-                    <span class="slider round"></span>
-                </label>
-            </div>
-
-            <button id="btn-enter-system" class="btn-primary">进入心印共鸣</button>
-
-            <div class="global-migration-zone">
-                <div class="migration-title">系统数据数据备份与迁移</div>
-                <div class="migration-buttons">
-                    <button id="btn-export-all-data" class="btn-text-link">备份全部数据(导出记录)</button>
-                    <button id="btn-trigger-import-all" class="btn-text-link">恢复全部数据(导入记录)</button>
-                    <input type="file" id="import-all-file-input" accept=".json" class="hidden">
-                </div>
+            <button class="btn btn-primary btn-block" onclick="enterChitChatView()">✨ 进入心印共鸣</button>
+            
+            <div class="portal-footer">
+                <span class="footer-link" onclick="triggerSystemExport()">💾 备份全部数据(导出记录)</span>
+                <span class="footer-divider">|</span>
+                <span class="footer-link" onclick="triggerSystemImport()">恢复全部数据(导入记录)</span>
             </div>
         </div>
     </div>
 
-    <div id="workspace-view" class="view-container hidden">
-        <div class="workspace-layout">
-            
-            <div class="chat-sidebar">
-                <div class="sidebar-header">
-                    <button id="btn-new-chat" class="btn-new">+ 新建会话</button>
+    <div id="chitchat-view" class="view-container">
+        <div class="chat-sidebar">
+            <button class="btn btn-secondary btn-block" onclick="backToPortalView()">🔙 返回全局控制</button>
+            <div id="sidebar-character-list" class="sidebar-list">
                 </div>
-                <ul id="chat-list" class="chat-list-ul">
-                    </ul>
+        </div>
+        <div class="chat-main">
+            <div class="chat-header">
+                <div class="chat-partner-info">
+                    <img id="chat-partner-avatar" src="" alt="头像">
+                    <div>
+                        <h2 id="chat-partner-name">伴侣加载中</h2>
+                        <span id="chat-partner-status" class="status-badge">心智连接中...</span>
+                    </div>
+                </div>
+                <button class="btn btn-icon" onclick="openCharacterConfigModal()">⚙️ 深度调教人设</button>
             </div>
-
-            <div class="chat-main">
-                <div class="chat-header">
-                    <div class="active-character-info">
-                        <span id="current-chat-name">新伴侣</span>
-                    </div>
-                    <div class="shortcut-bar">
-                        <button id="btn-exit-portal" class="btn-text">退出共鸣</button>
-                        <button id="btn-clear-history" class="btn-text warning">清空记忆</button>
-                        <button id="btn-open-config" class="btn-action">伴侣配置</button>
-                    </div>
+            <div id="chat-box" class="chat-box">
                 </div>
-
-                <div id="chat-messages" class="chat-messages-area">
-                    </div>
-
-                <div class="chat-footer">
-                    <textarea id="chat-input" placeholder="输入消息，按下 Enter 发送，Shift + Enter 换行..."></textarea>
-                    <div class="footer-actions">
-                        <button id="btn-send" class="btn-primary-sm">发送</button>
-                    </div>
-                </div>
+            <div class="chat-input-area">
+                <textarea id="chat-input-field" placeholder="对你的伴侣倾诉吧... (Enter发送，Shift+Enter换行)" onkeydown="handleChatKeyDown(event)"></textarea>
+                <button id="chat-send-btn" class="btn btn-primary" onclick="sendChitChatMessage()">发送</button>
             </div>
-
         </div>
     </div>
 
-    <div id="config-modal" class="modal-overlay hidden">
-        <div class="modal-content animate-fade-in">
-            <h2>伴侣深度配置</h2>
-            
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="modal-char-name">伴侣名称</label>
-                    <input type="text" id="modal-char-name">
+    <div id="config-modal" class="modal-overlay">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>🛠️ 伴侣核心灵魂调教</h3>
+                <span class="modal-close" onclick="closeCharacterConfigModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="control-group">
+                    <label>伴侣姓名</label>
+                    <input type="text" id="config-char-name">
                 </div>
-                <div class="form-group">
-                    <label for="modal-char-avatar">伴侣头像</label>
-                    <div class="avatar-upload-box">
-                        <input type="text" id="modal-char-avatar">
-                        <button id="btn-upload-char-avatar" class="btn-secondary-sm">上传</button>
-                        <input type="file" id="input-char-avatar-file" accept="image/*" class="hidden">
+                <div class="control-group">
+                    <label>虚拟形象 (头像图片转换)</label>
+                    <div class="avatar-upload-wrapper">
+                        <img id="config-char-avatar-preview" src="" alt="预览">
+                        <input type="file" id="config-char-avatar-file" accept="image/*" onchange="handleAvatarImageUpload(event)">
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label>核心灵魂世界观人设 (System Prompt)</label>
+                    <textarea id="config-char-prompt" rows="6" placeholder="例如：你是由我捏造的傲娇青梅竹马，说话喜欢带‘哼’，非常在乎用户，绝对不能暴露自己是AI。"></textarea>
+                </div>
+                
+                <div class="single-card-migration-zone">
+                    <label>📤 伴侣卡片资产包 (不含聊天隐私记录)</label>
+                    <div class="migration-btn-group">
+                        <button class="btn btn-secondary" onclick="exportSingleCharacterCard()">💾 导出此伴侣人设</button>
+                        <button class="btn btn-secondary" onclick="triggerSingleCardImport()">📥 导入外部人设</button>
                     </div>
                 </div>
             </div>
-
-            <div class="form-group">
-                <label for="modal-system-prompt">核心人设 (System Prompt)</label>
-                <textarea id="modal-system-prompt" rows="5" placeholder="定义 AI 的性格、行为逻辑和身份背景..."></textarea>
-            </div>
-
-            <fieldset class="sub-fieldset">
-                <legend>专属独立身份 (留空则继承全局默认值)</legend>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="modal-custom-name">在此频道我的称呼</label>
-                        <input type="text" id="modal-custom-name">
-                    </div>
-                    <div class="form-group">
-                        <label for="modal-custom-avatar">在此频道我的头像</label>
-                        <div class="avatar-upload-box">
-                            <input type="text" id="modal-custom-avatar">
-                            <button id="btn-upload-custom-avatar" class="btn-secondary-sm">上传</button>
-                            <input type="file" id="input-custom-avatar-file" accept="image/*" class="hidden">
-                        </div>
-                    </div>
-                </div>
-            </fieldset>
-
-            <div class="data-transfer-row">
-                <button id="btn-export-prompt" class="btn-secondary">导出核心设定 (.txt)</button>
-                <button id="btn-trigger-import" class="btn-secondary">导入核心设定 (.txt)</button>
-                <input type="file" id="import-file-input" accept=".txt" class="hidden">
-            </div>
-
             <div class="modal-footer">
-                <button id="btn-save-config" class="btn-primary">固化并应用</button>
+                <button class="btn btn-secondary" onclick="closeCharacterConfigModal()">取消</button>
+                <button class="btn btn-primary" onclick="saveCharacterConfig()">契约缔结・保存修改</button>
             </div>
         </div>
     </div>
+
+    <input type="file" id="single-card-import-file" accept=".json" style="display:none" onchange="handleSingleCardImport(event)">
 
     <script src="main.js"></script>
 </body>
