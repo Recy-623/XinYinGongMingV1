@@ -186,8 +186,8 @@ function appendMessageBubble(role, content, char, isPending = false) {
     let displayAvatar = "";
 
     if (role === 'user') {
-        displayName = char.customUserName || state.globals.userName || "韫欢欢";
-        let rawAvat = char.customUserAvatar || state.globals.userAvatar || "欢";
+        displayName = char.customUserName || state.globals.userName || "用户";
+        let rawAvat = char.customUserAvatar || state.globals.userAvatar || "我";
         displayAvatar = isImageSource(rawAvat) ? `<img src="${rawAvat}" class="avatar">` : `<div class="avatar">${rawAvat.substring(0,1)}</div>`;
     } else {
         displayName = char.name;
@@ -412,8 +412,8 @@ function importSystemPrompt(event) {
 function bindSystemEvents() {
     // 进入共鸣
     document.getElementById("btn-enter-system").addEventListener("click", () => {
-        state.globals.userName = document.getElementById("global-username").value.trim() || "韫欢欢";
-        state.globals.userAvatar = document.getElementById("global-avatar").value.trim() || "欢";
+        state.globals.userName = document.getElementById("global-username").value.trim() || "用户";
+        state.globals.userAvatar = document.getElementById("global-avatar").value.trim() || "我";
         state.globals.selectedModel = document.getElementById("global-model").value;
         state.globals.streamEnabled = document.getElementById("global-stream").checked;
         
