@@ -5,13 +5,128 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>心印共鸣 - v3.0</title>
     <link rel="stylesheet" href="styles.css">
+    
+    <style>
+        /* 微信对话流容器：取消原来的松散布局，紧凑排列 */
+        .msg-row {
+            display: flex !important;
+            gap: 12px;
+            margin-bottom: 20px; /* 稍微拉开每轮对话的间距 */
+            align-items: flex-start;
+            width: 100%;
+            box-sizing: border-box;
+            padding: 0 4px;
+        }
+
+        /* AI消息流靠左 */
+        .msg-row.ai {
+            justify-content: flex-start;
+            flex-direction: row;
+        }
+
+        /* 用户消息流靠右 */
+        .msg-row.user {
+            justify-content: flex-start;
+            flex-direction: row-reverse; /* 头像与气泡顺序反转 */
+        }
+
+        /* 完美的社交圆形头像 */
+        .chat-bubble-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 6px; /* 微信风格微圆角方块 */
+            object-fit: cover;
+            flex-shrink: 0;
+            border: none !important;
+        }
+
+        /* 垂直内容区：包裹气泡的父级 */
+        .chat-bubble-content-zone {
+            display: flex;
+            flex-direction: column;
+            /* 📥【核心自适应参数】：最大宽度设为 80% 避免死顶边缘，同时留出右侧/左侧呼吸空间 */
+            max-width: 80%; 
+            box-sizing: border-box;
+        }
+        
+        .msg-row.ai .chat-bubble-content-zone {
+            align-items: flex-start;
+        }
+        
+        .msg-row.user .chat-bubble-content-zone {
+            align-items: flex-end;
+        }
+
+        /* 极简社交主义：微信单聊中不显示多余的重复名字 */
+        .chat-bubble-name {
+            display: none !important; 
+        }
+
+        /* 👑 核心骨架：微信气泡自适应重做 */
+        .msg-row .bubble {
+            position: relative;
+            padding: 11px 15px !important;
+            font-size: 14.5px !important;
+            line-height: 1.6 !important;
+            border-radius: 8px !important;
+            box-shadow: none !important;
+            margin: 0 !important;
+            
+            /* ⚡ 终极自适应修复 */
+            width: fit-content !important;     /* 既能包裹短文字，长文字时又能顺应父级约束 */
+            max-width: 100% !important;        /* 决不超出容器区 */
+            white-space: pre-wrap !important;  /* 完美保留AI模型返回的换行排版 */
+            word-wrap: break-word !important;  /* 强制溢出单词自动折行 */
+            word-break: break-word !important; 
+            box-sizing: border-box !important;
+        }
+
+        /* 🟢 用户微信绿气泡（右侧） */
+        .msg-row.user .bubble {
+            background-color: #07c160 !important; /* 微信官方原生绿色 */
+            color: #ffffff !important;            /* 纯白文字 */
+            border: none !important;
+            text-align: left;                     /* 内部文字依旧左对齐 */
+        }
+
+        /* 🛢️ AI高级灰气泡（左侧） */
+        .msg-row.ai .bubble {
+            background-color: #2c2c2e !important; /* 优雅的深灰黑底色 */
+            color: #f3f4f6 !important;            /* 柔和白字 */
+            border: 1px solid rgba(255, 255, 255, 0.05) !important;
+            text-align: left;
+        }
+
+        /* 修正输入框及整体布局层级 */
+        .chat-box {
+            padding: 24px 20px !important;
+            background: #111112 !important; /* 仿夜间模式微信底板 */
+            overflow-x: hidden !important;  /* 绝不允许出现横向滚动条 */
+        }
+    </style>
 </head>
 <body>
     <div id="portal-view" class="view-container active">
         <div class="portal-card">
             <h1>✨ 心印共鸣</h1>
-            <p class="subtitle">跨越数字鸿沟，重塑独属你的灵魂羁绊 (v3.0 跨云端版)</p>
+            <p class="subtitle">跨越数字鸿沟，重塑独属你的灵魂羁绊 (v3.0 兼容api版本)</p>
             
+            <div class="control-group" style="padding: 15px; background: rgba(255,255,255,0.05); border-radius: 8px; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.1);">
+                <label style="font-weight: bold; color: #a78bfa; margin-bottom: 10px; display: block;">👤 用户个人设定</label>
+                <div style="display: flex; gap: 15px; align-items: center;">
+                    <div style="position: relative;">
+                        <img id="user-global-avatar-preview" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' fill='%233b82f6'><circle cx='50' cy='50' r='50'/><text x='50' y='55' font-size='30' fill='white' text-anchor='middle'>🙋</text></svg>" 
+                             style="width: 50px; height: 50px; border-radius: 50%; object-fit: cover; border: 2px solid #8b5cf6; cursor: pointer;"
+                             onclick="document.getElementById('user-global-avatar-file').click()">
+                        <input type="file" id="user-global-avatar-file" accept="image/*" style="display: none;" onchange="window.handleAvatarFileChange(event, 'user-global-avatar-preview'); setTimeout(window.saveUserGlobalProfile, 200);">
+                    </div>
+                    <div style="flex: 1;">
+                        <label style="color: #9ca3af; font-size:12px; margin-bottom: 4px; display: block;">我的称呼 / 昵称：</label>
+                        <input type="text" id="user-global-name-input" placeholder="请输入你的大名..." oninput="window.saveUserGlobalProfile()" style="width: 100%; padding: 8px; background: #1f2937; border: 1px solid #4b5563; color: #fff; border-radius: 6px; box-sizing: border-box;">
+                    </div>
+                </div>
+            </div>
+
             <div class="control-group">
                 <label>🌐 大模型驱动提供商</label>
                 <select id="api-provider-select" onchange="toggleApiProviderFields()">
@@ -35,7 +150,7 @@
             </div>
             
             <div class="control-group">
-                <label>🤖 伴侣心智选择 (AI模型)</label>
+                <label>🤖 心智选择 (AI模型)</label>
                 <div class="model-refresh-wrapper">
                     <select id="model-select">
                         <option value="">正在检测/等待加载驱动源...</option>
@@ -45,9 +160,9 @@
             </div>
 
             <div class="control-group">
-                <label>💞 选择共鸣的灵魂伴侣</label>
+                <label>💞 选择共鸣的TA</label>
                 <div id="character-selector-grid" class="character-grid">
-                    </div>
+                </div>
             </div>
 
             <button class="btn btn-primary btn-block" onclick="enterChitChatView()">✨ 进入心印共鸣</button>
@@ -61,26 +176,26 @@
     </div>
 
     <div id="chitchat-view" class="view-container">
-        <div class="chat-sidebar">
+        <div class="chat-sidebar" style="display: flex; flex-direction: column; height: 100%;">
             <button class="btn btn-secondary btn-block" onclick="backToPortalView()">🔙 返回全局控制</button>
-            <div id="sidebar-character-list" class="sidebar-list">
-                </div>
+            <div id="sidebar-character-list" class="sidebar-list" style="flex: 1; display: flex; flex-direction: column;">
+            </div>
         </div>
         <div class="chat-main">
             <div class="chat-header">
                 <div class="chat-partner-info">
                     <img id="chat-partner-avatar" src="" alt="头像">
                     <div>
-                        <h2 id="chat-partner-name">伴侣加载中</h2>
+                        <h2 id="chat-partner-name">加载中</h2>
                         <span id="chat-partner-status" class="status-badge">心智连接中...</span>
                     </div>
                 </div>
                 <button class="btn btn-icon" onclick="openCharacterConfigModal()">⚙️ 深度调教人设</button>
             </div>
             <div id="chat-box" class="chat-box">
-                </div>
+            </div>
             <div class="chat-input-area">
-                <textarea id="chat-input-field" placeholder="对你的伴侣倾诉吧... (Enter发送，Shift+Enter换行)" onkeydown="handleChatKeyDown(event)"></textarea>
+                <textarea id="chat-input-field" placeholder="说些什么呢... (Enter发送，Shift+Enter换行)" onkeydown="handleChatKeyDown(event)"></textarea>
                 <button id="chat-send-btn" class="btn btn-primary" onclick="sendChitChatMessage()">发送</button>
             </div>
         </div>
@@ -89,19 +204,19 @@
     <div id="config-modal" class="modal-overlay">
         <div class="modal-card">
             <div class="modal-header">
-                <h3>🛠️ 伴侣核心灵魂调教</h3>
+                <h3>🛠️ 核心灵魂调教</h3>
                 <span class="modal-close" onclick="closeCharacterConfigModal()">&times;</span>
             </div>
             <div class="modal-body">
                 <div class="control-group">
-                    <label>伴侣姓名</label>
+                    <label>姓名</label>
                     <input type="text" id="config-char-name">
                 </div>
                 <div class="control-group">
                     <label>虚拟形象 (头像图片转换)</label>
                     <div class="avatar-upload-wrapper">
                         <img id="config-char-avatar-preview" src="" alt="预览">
-                        <input type="file" id="config-char-avatar-file" accept="image/*" onchange="handleAvatarImageUpload(event)">
+                        <input type="file" id="config-char-avatar-file" accept="image/*" onchange="window.handleAvatarFileChange(event, 'config-char-avatar-preview')">
                     </div>
                 </div>
                 <div class="control-group">
@@ -110,9 +225,9 @@
                 </div>
                 
                 <div class="single-card-migration-zone">
-                    <label>📤 伴侣卡片资产包 (不含聊天隐私记录)</label>
+                    <label>📤卡片资产包 (不含聊天隐私记录)</label>
                     <div class="migration-btn-group">
-                        <button class="btn btn-secondary" onclick="exportSingleCharacterCard()">💾 导出此伴侣人设</button>
+                        <button class="btn btn-secondary" onclick="exportSingleCharacterCard()">💾 导出此人设</button>
                         <button class="btn btn-secondary" onclick="triggerSingleCardImport()">📥 导入外部人设</button>
                     </div>
                 </div>

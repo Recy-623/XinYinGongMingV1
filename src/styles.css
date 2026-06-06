@@ -138,7 +138,7 @@ select:focus, input:focus, textarea:focus { border-color: var(--accent-color); }
 .avatar-upload-wrapper { display: flex; align-items: center; gap: 1rem; }
 .avatar-upload-wrapper img { width: 60px; height: 60px; border-radius: 50%; object-fit: cover; border: 2px solid var(--border-color); }
 
-/* ✨ V3.0 单伴侣人设导入导出面板美化 */
+/* ✨ V3.0 单人设导入导出面板美化 */
 .single-card-migration-zone {
     margin-top: 1.5rem; padding-top: 1.2rem; border-top: 1px dashed var(--border-color);
 }
