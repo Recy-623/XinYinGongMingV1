@@ -38,7 +38,7 @@ body, html {
 
 .portal-card {
     background: #f5ebe0;
-    padding: 40px;
+    padding: 35px 40px;
     border-radius: 16px;
     box-shadow: 0 8px 30px rgba(0,0,0,0.08);
     width: 480px;
@@ -56,13 +56,13 @@ body, html {
     text-align: center;
     font-size: 14px;
     color: #8a7a78;
-    margin-bottom: 30px;
+    margin-bottom: 25px;
 }
 
 .form-group {
     display: flex;
     flex-direction: column;
-    margin-bottom: 18px;
+    margin-bottom: 16px;
 }
 
 .form-group label {
@@ -81,8 +81,8 @@ body, html {
     flex: 1;
 }
 
-/* 头像组合输入框控制 */
-.avatar-upload-box {
+/* 模型选择器组合控制样式 */
+.model-select-box, .avatar-upload-box {
     display: flex;
     gap: 8px;
 }
@@ -155,6 +155,7 @@ input:checked + .slider:before { transform: translateX(22px); }
     font-weight: bold;
     cursor: pointer;
     transition: background 0.2s;
+    margin-bottom: 15px;
 }
 .btn-primary:hover { background-color: #722ede; }
 
@@ -190,6 +191,34 @@ input:checked + .slider:before { transform: translateX(22px); }
     white-space: nowrap;
 }
 .btn-secondary-sm:hover { background-color: #d5bdaf; }
+
+/* 需求②：全局记录迁移管理面板样式 */
+.global-migration-zone {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px dashed #d5bdaf;
+    text-align: center;
+}
+.migration-title {
+    font-size: 12px;
+    color: #8a7a78;
+    margin-bottom: 8px;
+    font-weight: 500;
+}
+.migration-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+}
+.btn-text-link {
+    background: none;
+    border: none;
+    font-size: 12px;
+    color: #8338ec;
+    cursor: pointer;
+    text-decoration: underline;
+}
+.btn-text-link:hover { color: #722ede; }
 
 
 /* ================= 类微信双栏自适应布局 ================= */
@@ -244,7 +273,6 @@ input:checked + .slider:before { transform: translateX(22px); }
 .chat-item:hover { background-color: #dfd7ce; }
 .chat-item.active { background-color: #eddcd2; }
 
-/* 头像框核心，完美兼容 Base64 本地图片裁剪缩放 */
 .avatar {
     width: 42px;
     height: 42px;
@@ -257,11 +285,10 @@ input:checked + .slider:before { transform: translateX(22px); }
     color: #fff;
     font-size: 16px;
     overflow: hidden;
-    object-fit: cover; /* 保证本地图片不被拉伸变形 */
+    object-fit: cover; 
     flex-shrink: 0;
 }
 
-/* 默认左侧角色列表里头像和文本间距为 12px */
 .chat-sidebar .avatar {
     margin-right: 12px;
 }
@@ -364,20 +391,16 @@ input:checked + .slider:before { transform: translateX(22px); }
     align-items: flex-start;
 }
 
-/* ================= 核心需求①：对齐两边对话和头像的间隔 ================= */
-/* 1. AI 消息行（靠左）：头像在左，包装盒在右，间距 12px */
+/* 对话间隔对齐 */
 .ai-row .avatar {
     margin-right: 12px; 
 }
-
-/* 2. 用户消息行（靠右）：利用 row-reverse 反转后，头像在右，包装盒在左 */
 .msg-row.user-row {
     flex-direction: row-reverse; 
 }
-/* 此时反转后，用户头像的左边面向气泡包装盒，设置左边距为 12px，两边中间间距完美对称相同 */
 .user-row .avatar {
     margin-left: 12px; 
-    margin-right: 0px; /* 清空可能继承的右边距 */
+    margin-right: 0px; 
 }
 
 .msg-wrapper {
@@ -441,7 +464,7 @@ input:checked + .slider:before { transform: translateX(22px); }
     margin-top: 8px;
 }
 
-/* ================= 弹窗样式 ================= */
+/* 弹窗控制 */
 .modal-overlay {
     position: fixed;
     top: 0; left: 0; width: 100vw; height: 100vh;

@@ -1,12 +1,13 @@
 /**
- * 心印共鸣系统核心数据处理与交互逻辑层 - 第三版（对齐间距 + 本地图片Base64头像上传）
+ * 心印共鸣系统核心数据处理与交互逻辑层 - v2.1 
+ * 升级特性：① 运行中模型一键探测与动态刷新 ② 聊天记录及系统全量配置无损导入导出（迁移）
  */
 
 // 1. 全局核心状态机
 let state = {
     globals: {
-        userName: "用户名",
-        userAvatar: "用户",
+        userName: "用户",
+        userAvatar: "我",
         contextLimit: 20,
         streamEnabled: true,
         selectedModel: ""
@@ -18,8 +19,8 @@ let state = {
 
 // 2. 本地持久化加载与初始化
 function initSystem() {
-    state.globals.userName = localStorage.getItem("user-name") || "用户名";
-    state.globals.userAvatar = localStorage.getItem("user-avatar") || "用户";
+    state.globals.userName = localStorage.getItem("user-name") || "用户";
+    state.globals.userAvatar = localStorage.getItem("user-avatar") || "我";
     
     let localLimit = localStorage.getItem("context-limit");
     state.globals.contextLimit = localLimit !== null ? parseInt(localLimit, 10) : 20;
@@ -70,9 +71,16 @@ function saveCharactersToStorage() {
     localStorage.setItem("characters", JSON.stringify(state.characters));
 }
 
-// 3. 自动化抓取本地 Ollama 已有模型
-async function fetchLocalOllamaModels() {
+// 3. 需求①：自动化与主动按键抓取本地 Ollama 服务模型
+async function fetchLocalOllamaModels(isManualRefresh = false) {
     const modelSelect = document.getElementById("global-model");
+    const refreshBtn = document.getElementById("btn-refresh-models");
+    
+    if (isManualRefresh && refreshBtn) {
+        refreshBtn.innerText = "获取中...";
+        refreshBtn.disabled = true;
+    }
+
     try {
         const response = await fetch("http://localhost:11434/api/tags");
         if (!response.ok) throw new Error("API响应失败");
@@ -82,26 +90,34 @@ async function fetchLocalOllamaModels() {
         modelSelect.innerHTML = "";
         if (state.models.length === 0) {
             modelSelect.innerHTML = `<option value="">⚠️ 本地已启动但无安装模型</option>`;
-            return;
-        }
+        } else {
+            state.models.forEach(m => {
+                let opt = document.createElement("option");
+                opt.value = m.name;
+                opt.innerText = m.name;
+                // 如果用户之前选过或者缓存过，保持选中状态
+                if (m.name === state.globals.selectedModel) {
+                    opt.selected = true;
+                }
+                modelSelect.appendChild(opt);
+            });
 
-        state.models.forEach(m => {
-            let opt = document.createElement("option");
-            opt.value = m.name;
-            opt.innerText = m.name;
-            if (m.name === state.globals.selectedModel) {
-                opt.selected = true;
+            // 如果当前无选择，默认勾选第一个
+            if(!modelSelect.value && state.models.length > 0) {
+                state.globals.selectedModel = state.models[0].name;
+                saveGlobalsToStorage();
             }
-            modelSelect.appendChild(opt);
-        });
-
-        if(!state.globals.selectedModel && state.models.length > 0) {
-            state.globals.selectedModel = state.models[0].name;
-            saveGlobalsToStorage();
         }
+        if (isManualRefresh) alert("🔄 Ollama 服务连接成功！已同步刷新最新模型状态。");
     } catch (e) {
         console.error(e);
         modelSelect.innerHTML = `<option value="">❌ 未能发现本地Ollama服务</option>`;
+        if (isManualRefresh) alert("❌ 刷新失败：依然无法连接到本地 Ollama，请确认后端终端已成功开启。");
+    } finally {
+        if (isManualRefresh && refreshBtn) {
+            refreshBtn.innerText = "刷新";
+            refreshBtn.disabled = false;
+        }
     }
 }
 
@@ -307,7 +323,7 @@ async function handleSendMessage() {
     }
 }
 
-// 6. 弹窗管理与 Live Sync
+// 6. 单一频道人设弹窗同步
 let openModalCharRef = null; 
 
 function openConfigModal() {
@@ -337,14 +353,12 @@ function bindLiveSyncListeners() {
             document.getElementById("current-chat-name").innerText = openModalCharRef.name;
         }
     });
-
     document.getElementById("modal-char-avatar").addEventListener("input", (e) => {
         if (openModalCharRef) {
             openModalCharRef.avatar = e.target.value || "新";
             renderChatList();
         }
     });
-    
     document.getElementById("modal-system-prompt").addEventListener("input", (e) => {
         if (openModalCharRef) openModalCharRef.systemPrompt = e.target.value;
     });
@@ -354,32 +368,6 @@ function bindLiveSyncListeners() {
     document.getElementById("modal-custom-avatar").addEventListener("input", (e) => {
         if (openModalCharRef) openModalCharRef.customUserAvatar = e.target.value;
     });
-}
-
-// 7. 核心需求②：处理本地图片上传并转换为 Base64 存储
-function handleImageUpload(fileInputId, targetInputId, callback) {
-    const fileInput = document.getElementById(fileInputId);
-    const targetInput = document.getElementById(targetInputId);
-    
-    const file = fileInput.files[0];
-    if (!file) return;
-
-    // 限制图片大小防止 LocalStorage 超载 (控制在 1MB 以内最佳)
-    if (file.size > 1.5 * 1024 * 1024) {
-        alert("为了本地流畅存储，请选择小于 1.5MB 的图片。");
-        fileInput.value = "";
-        return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        const base64Str = e.target.result;
-        targetInput.value = base64Str;
-        // 触发对应的内存同步回调
-        callback(base64Str);
-    };
-    reader.readAsDataURL(file);
-    fileInput.value = ""; // 清空以便下次重复选择
 }
 
 function exportSystemPrompt() {
@@ -408,8 +396,109 @@ function importSystemPrompt(event) {
     event.target.value = ""; 
 }
 
-// 8. 全局与弹窗的事件绑定
+// 7. 本地图片上传转 Base64 逻辑
+function handleImageUpload(fileInputId, targetInputId, callback) {
+    const fileInput = document.getElementById(fileInputId);
+    const targetInput = document.getElementById(targetInputId);
+    const file = fileInput.files[0];
+    if (!file) return;
+
+    if (file.size > 1.5 * 1024 * 1024) {
+        alert("为了本地流畅存储，请选择小于 1.5MB 的图片。");
+        fileInput.value = "";
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const base64Str = e.target.result;
+        targetInput.value = base64Str;
+        callback(base64Str);
+    };
+    reader.readAsDataURL(file);
+    fileInput.value = ""; 
+}
+
+// 8. 需求②：系统级全局快照导出（全量聊天记录与配置迁移）
+// 8. 需求②：系统级全局快照导出（全量聊天记录与配置迁移）
+function exportFullSystemData() {
+    // 聚合打包当前内存与持久化中的全量快照
+    const snapshot = {
+        version: "2.1-migration",
+        timestamp: Date.now(),
+        globals: state.globals,
+        characters: state.characters
+    };
+
+    const fileName = `心印共鸣_全量数据备份_${new Date().toLocaleDateString().replace(/\//g, '-')}.json`;
+
+    const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    // ✨ 新增：给玩家/用户的无缝暖心反馈弹窗
+    alert(
+        `💾 心印共鸣：全量数据备份成功！\n\n` +
+        `📦 备份文件名：${fileName}\n` +
+        `📍 存放路径：已触发系统下载，请前往您当前电脑/浏览器的【默认下载文件夹】(Downloads) 中查看并妥善保管该文件。`
+    );
+}
+// 8. 需求②：全量系统快照与聊天记录无损导入
+function importFullSystemData(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    if (!confirm("⚠️ 警告：导入全量备份将彻底覆盖当前电脑上的所有角色设定和历史聊天记录！是否确认覆盖？")) {
+        event.target.value = "";
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const data = JSON.parse(e.target.result);
+            // 基础校验
+            if (!data.globals || !data.characters) {
+                throw new Error("配置文件格式不完整，缺失核心节点");
+            }
+
+            // 导入存入快照
+            state.globals = data.globals;
+            state.characters = data.characters;
+
+            // 深度写回本地浏览器 LocalStorage
+            saveGlobalsToStorage();
+            saveCharactersToStorage();
+
+            alert("🎉 全量聊天记录与系统人设数据已成功迁移导入！应用现在将自动刷新载入。");
+            window.location.reload(); // 一键原子重载界面
+        } catch (err) {
+            alert("❌ 导入失败：所选文件并不是合法的【心印共鸣】备份配置文件。");
+            console.error(err);
+        }
+    };
+    reader.readAsText(file);
+    event.target.value = "";
+}
+
+// 9. 全局与弹窗的事件绑定
 function bindSystemEvents() {
+    // 需求①：点击刷新按钮动态重新获取 Ollama 状态
+    document.getElementById("btn-refresh-models").addEventListener("click", () => {
+        fetchLocalOllamaModels(true);
+    });
+
+    // 需求②：全局全量数据迁移绑定
+    document.getElementById("btn-export-all-data").addEventListener("click", exportFullSystemData);
+    document.getElementById("btn-trigger-import-all").addEventListener("click", () => {
+        document.getElementById("import-all-file-input").click();
+    });
+    document.getElementById("import-all-file-input").addEventListener("change", importFullSystemData);
+
     // 进入共鸣
     document.getElementById("btn-enter-system").addEventListener("click", () => {
         state.globals.userName = document.getElementById("global-username").value.trim() || "用户";
@@ -421,10 +510,8 @@ function bindSystemEvents() {
         state.globals.contextLimit = (isNaN(limitVal) || limitVal < 0) ? 20 : limitVal;
 
         saveGlobalsToStorage();
-        
         document.getElementById("portal-view").classList.add("hidden");
         document.getElementById("workspace-view").classList.remove("hidden");
-        
         renderChatBox();
     });
 
@@ -484,7 +571,7 @@ function bindSystemEvents() {
     document.getElementById("btn-save-config").addEventListener("click", () => {
         saveCharactersToStorage();
         closeConfigModal();
-        renderChatBox(); // 确保弹窗关闭后，聊天气泡区及时刷新最新上传的头像
+        renderChatBox(); 
     });
     document.getElementById("config-modal").addEventListener("click", (e) => {
         if (e.target.id === "config-modal") closeConfigModal();
@@ -497,8 +584,7 @@ function bindSystemEvents() {
     });
     document.getElementById("import-file-input").addEventListener("change", importSystemPrompt);
 
-    // ================= 核心需求②：三大本地图片头像上传事件监听 =================
-    // 1. 全局控制页：上传我的默认头像
+    // 头像上传事件监听
     document.getElementById("btn-upload-global-avatar").addEventListener("click", () => {
         document.getElementById("input-global-avatar-file").click();
     });
@@ -507,8 +593,6 @@ function bindSystemEvents() {
             state.globals.userAvatar = base64;
         });
     });
-
-    // 2. 弹窗页：上传伴侣头像
     document.getElementById("btn-upload-char-avatar").addEventListener("click", () => {
         document.getElementById("input-char-avatar-file").click();
     });
@@ -516,12 +600,10 @@ function bindSystemEvents() {
         handleImageUpload("input-char-avatar-file", "modal-char-avatar", (base64) => {
             if (openModalCharRef) {
                 openModalCharRef.avatar = base64;
-                renderChatList(); // 侧边栏立刻获得图片预览
+                renderChatList(); 
             }
         });
     });
-
-    // 3. 弹窗页：上传此频道我的专属头像
     document.getElementById("btn-upload-custom-avatar").addEventListener("click", () => {
         document.getElementById("input-custom-avatar-file").click();
     });
@@ -536,7 +618,7 @@ function bindSystemEvents() {
     bindLiveSyncListeners();
 }
 
-// 9. 底层工具防呆函数
+// 10. 底层工具防呆函数
 function isImageSource(str) {
     if (!str) return false;
     return str.startsWith("http://") || str.startsWith("https://") || str.startsWith("data:image");
