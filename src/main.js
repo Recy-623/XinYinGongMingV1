@@ -5,8 +5,8 @@
 // 1. 全局核心状态机
 let state = {
     globals: {
-        userName: "韫欢欢",
-        userAvatar: "欢",
+        userName: "用户名",
+        userAvatar: "用户",
         contextLimit: 20,
         streamEnabled: true,
         selectedModel: ""
@@ -18,8 +18,8 @@ let state = {
 
 // 2. 本地持久化加载与初始化
 function initSystem() {
-    state.globals.userName = localStorage.getItem("user-name") || "韫欢欢";
-    state.globals.userAvatar = localStorage.getItem("user-avatar") || "欢";
+    state.globals.userName = localStorage.getItem("user-name") || "用户名";
+    state.globals.userAvatar = localStorage.getItem("user-avatar") || "用户";
     
     let localLimit = localStorage.getItem("context-limit");
     state.globals.contextLimit = localLimit !== null ? parseInt(localLimit, 10) : 20;
