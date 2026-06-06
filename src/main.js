@@ -1,5 +1,5 @@
 // ==========================================
-// 心印共鸣 v3.2 终极安全版（本地存储实时销毁机制）
+// 心印共鸣 v3.3 终极安全与选单联动版
 // ==========================================
 
 // 1. 全局系统状态机
@@ -9,7 +9,7 @@ let state = {
         userAvatar: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' fill='%233b82f6'><circle cx='50' cy='50' r='50'/><text x='50' y='55' font-size='30' fill='white' text-anchor='middle'>🙋</text></svg>", 
         selectedProvider: "openai", 
         cloudApiUrl: "https://api.deepseek.com/v1", 
-        selectedModel: "deepseek-chat"
+        selectedModel: ""
     },
     characters: [], 
     activeCharacterId: "" 
@@ -244,16 +244,30 @@ function appendChatBubble(role, content) {
 // ==========================================
 // ⚡ 大模型接口通信与安全防御总线
 // ==========================================
+
+// 🔒 安全指纹追踪锁
+let lastVerifiedUrl = "";
+let lastVerifiedKey = "";
+
 window.toggleApiProviderFields = function() {
     const providerSelect = document.getElementById("api-provider-select");
     if (!providerSelect) return;
     const provider = providerSelect.value;
     state.globals.selectedProvider = provider;
+    
     const panel = document.getElementById("cloud-api-panel");
     if (panel) {
         if (provider === "openai") panel.classList.remove("hidden");
         else panel.classList.add("hidden");
     }
+
+    // ⚡ 联动修改点 1：切换驱动提供商时，立刻将模型选择器内容置空并提示刷新
+    state.globals.selectedModel = "";
+    const modelSelect = document.getElementById("model-select");
+    if (modelSelect) {
+        modelSelect.innerHTML = "<option value=''>⚠️ 驱动源已变，请重新刷新或检测模型...</option>";
+    }
+    
     window.saveAppState();
 };
 
@@ -288,23 +302,23 @@ window.refreshModels = async function() {
     window.saveAppState();
 };
 
-// 🔒 安全指纹追踪锁
-let lastVerifiedUrl = "";
-let lastVerifiedKey = "";
-
-// 🔒 核心防御点 1：输入框实时销毁机制。只要用户动手改任何数据，本地存储立刻强制抹除
+// 🔒 核心防御与UI置空点 2：只要用户在输入框动手改数据，本地存储清空，且大模型下拉框立刻置空
 window.handleApiFieldInputTrigger = function() {
     const currentUrlInput = document.getElementById("api-url-input").value.trim();
     const currentKeyInput = document.getElementById("api-key-input").value.trim();
 
-    // 只要当前输入框内容与最后一次验证通过的内容有偏差
     if (currentUrlInput !== lastVerifiedUrl || currentKeyInput !== lastVerifiedKey) {
-        // 斩草除根：直接从控制台 Application (localStorage) 中销毁正确密钥
+        // 1. 斩草除根清除旧秘钥与URL
         localStorage.removeItem("xinyingongming_secure_apikey");
         state.globals.cloudApiUrl = "";
-        // 内存同步置空，绝不留任何旧钥匙在系统中
         state.globals.selectedModel = ""; 
         window.saveAppState();
+
+        // 2. ⚡ 联动修改：UI层面同步斩断，将下拉框内容彻底打回原形
+        const modelSelect = document.getElementById("model-select");
+        if (modelSelect) {
+            modelSelect.innerHTML = "<option value=''>❌ 配置已被改动，请重新验证连接</option>";
+        }
     }
 };
 
@@ -326,7 +340,6 @@ window.testCloudConnection = async function() {
             body: JSON.stringify({ model: "deepseek-chat", messages: [{ role: "user", content: "ping" }], max_tokens: 1 })
         });
         if (res.ok) {
-            // 只有握手成功，才允许把秘钥真正写入 localStorage
             state.globals.cloudApiUrl = baseUrl;
             localStorage.setItem("xinyingongming_secure_apikey", apiKey);
             
@@ -336,13 +349,14 @@ window.testCloudConnection = async function() {
             
             window.saveAppState();
             alert("✅ 灵魂链接成功！云端通道已打通并加密授权！");
+            
+            // 重新刷新并填满大模型列表
             window.refreshModels();
         } else { alert(`❌ 链接失败，状态码: ${res.status}`); }
     } catch (err) { alert(`❌ 网络错误: ${err}`); } 
     finally { btn.innerText = "⚡ 测试云端连接"; btn.disabled = false; }
 };
 
-// 🔒 核心防御点 2：进入界面的二次阻断
 window.enterChitChatView = function() {
     if (state.characters.length === 0) {
         alert("🔒 契约阻断：当前没有任何人设，请点击新建角色卡！");
@@ -351,18 +365,22 @@ window.enterChitChatView = function() {
     const modelSelect = document.getElementById("model-select");
     if (!modelSelect) return;
     const modelValue = modelSelect.value;
-    if (!modelValue || modelValue.startsWith("❌")) { alert("🔒 请先选择一个合法的 AI 大模型！"); return; }
+    if (!modelValue || modelValue.startsWith("❌") || modelValue.startsWith("⚠️")) { 
+        alert("🔒 请先选择一个合法的 AI 大模型！（若列表为空，请检查配置并重新测试连接或刷新）"); 
+        return; 
+    }
 
     if (state.globals.selectedProvider === "openai") {
         const currentUrlInput = document.getElementById("api-url-input").value.trim();
         const currentKeyInput = document.getElementById("api-key-input").value.trim();
         const storedKey = localStorage.getItem("xinyingongming_secure_apikey");
 
-        // 如果被改动过或者根本没有过存储凭证
         if (currentUrlInput !== lastVerifiedUrl || currentKeyInput !== lastVerifiedKey || !storedKey) {
             localStorage.removeItem("xinyingongming_secure_apikey");
             state.globals.cloudApiUrl = "";
+            state.globals.selectedModel = "";
             window.saveAppState();
+            if (modelSelect) modelSelect.innerHTML = "<option value=''>❌ 配置已被改动，请重新验证连接</option>";
             alert("🛑 安全熔断：配置已被篡改且未重新测试连接！旧资产已从控制台销毁，请重新测试。");
             return;
         }
@@ -393,6 +411,16 @@ window.backToPortalView = function() {
     document.getElementById("api-url-input").value = state.globals.cloudApiUrl || "";
     document.getElementById("api-key-input").value = localStorage.getItem("xinyingongming_secure_apikey") || "";
     window.toggleApiProviderFields();
+    
+    // 如果返回时有正确保存的模型，尝试回填还原
+    if (state.globals.selectedModel) {
+        setTimeout(() => {
+            const select = document.getElementById("model-select");
+            if (select && select.querySelector(`option[value="${state.globals.selectedModel}"]`)) {
+                select.value = state.globals.selectedModel;
+            }
+        }, 300);
+    }
     renderCharacterSelectors();
 };
 
@@ -468,7 +496,7 @@ window.handleSingleCardImport = function(e) {
                     systemPrompt: card.systemPrompt, history: [] 
                 });
                 state.activeCharacterId = newId; window.saveAppState();
-                alert(`🎉 成功载入外部人设：【${card.name}】！`); renderCharacterSelectors();
+                alert(`🎉 成功载入外部人格：【${card.name}】！`); renderCharacterSelectors();
             } else { alert("❌ 导入失败：非合法的 V3 人设卡文件。"); }
         } catch (err) { alert("❌ 导入异常"); }
     };
@@ -495,16 +523,13 @@ window.initApplicationCore = function() {
     
     if (urlInput) {
         urlInput.value = state.globals.cloudApiUrl || "";
-        // 绑定核心实时监听
         urlInput.addEventListener("input", window.handleApiFieldInputTrigger);
     }
     if (keyInput) {
         keyInput.value = localStorage.getItem("xinyingongming_secure_apikey") || "";
-        // 绑定核心实时监听
         keyInput.addEventListener("input", window.handleApiFieldInputTrigger);
     }
     
-    // 初始化时同步指纹锁
     lastVerifiedUrl = state.globals.cloudApiUrl || "";
     lastVerifiedKey = localStorage.getItem("xinyingongming_secure_apikey") || "";
 
