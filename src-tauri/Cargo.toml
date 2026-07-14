@@ -19,9 +19,4 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
-tauri-plugin-opener = "2"
-tauri-plugin-dialog = "2" # 👈 新增：激活原生保存/打开对话框插件
-tauri-plugin-fs = "2"# 👈 新增：激活原生文件系统写入插件
-serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-

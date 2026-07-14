@@ -1,246 +1,39 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>心印共鸣 - v3.0</title>
-    <link rel="stylesheet" href="styles.css">
-    
-    <style>
-        /* 微信对话流容器：取消原来的松散布局，紧凑排列 */
-        .msg-row {
-            display: flex !important;
-            gap: 12px;
-            margin-bottom: 20px; /* 稍微拉开每轮对话的间距 */
-            align-items: flex-start;
-            width: 100%;
-            box-sizing: border-box;
-            padding: 0 4px;
-        }
-
-        /* AI消息流靠左 */
-        .msg-row.ai {
-            justify-content: flex-start;
-            flex-direction: row;
-        }
-
-        /* 用户消息流靠右 */
-        .msg-row.user {
-            justify-content: flex-start;
-            flex-direction: row-reverse; /* 头像与气泡顺序反转 */
-        }
-
-        /* 完美的社交圆形头像 */
-        .chat-bubble-avatar {
-            width: 40px;
-            height: 40px;
-            border-radius: 6px; /* 微信风格微圆角方块 */
-            object-fit: cover;
-            flex-shrink: 0;
-            border: none !important;
-        }
-
-        /* 垂直内容区：包裹气泡的父级 */
-        .chat-bubble-content-zone {
-            display: flex;
-            flex-direction: column;
-            /* 📥【核心自适应参数】：最大宽度设为 80% 避免死顶边缘，同时留出右侧/左侧呼吸空间 */
-            max-width: 80%; 
-            box-sizing: border-box;
-        }
-        
-        .msg-row.ai .chat-bubble-content-zone {
-            align-items: flex-start;
-        }
-        
-        .msg-row.user .chat-bubble-content-zone {
-            align-items: flex-end;
-        }
-
-        /* 极简社交主义：微信单聊中不显示多余的重复名字 */
-        .chat-bubble-name {
-            display: none !important; 
-        }
-
-        /* 👑 核心骨架：微信气泡自适应重做 */
-        .msg-row .bubble {
-            position: relative;
-            padding: 11px 15px !important;
-            font-size: 14.5px !important;
-            line-height: 1.6 !important;
-            border-radius: 8px !important;
-            box-shadow: none !important;
-            margin: 0 !important;
-            
-            /* ⚡ 终极自适应修复 */
-            width: fit-content !important;     /* 既能包裹短文字，长文字时又能顺应父级约束 */
-            max-width: 100% !important;        /* 决不超出容器区 */
-            white-space: pre-wrap !important;  /* 完美保留AI模型返回的换行排版 */
-            word-wrap: break-word !important;  /* 强制溢出单词自动折行 */
-            word-break: break-word !important; 
-            box-sizing: border-box !important;
-        }
-
-        /* 🟢 用户微信绿气泡（右侧） */
-        .msg-row.user .bubble {
-            background-color: #07c160 !important; /* 微信官方原生绿色 */
-            color: #ffffff !important;            /* 纯白文字 */
-            border: none !important;
-            text-align: left;                     /* 内部文字依旧左对齐 */
-        }
-
-        /* 🛢️ AI高级灰气泡（左侧） */
-        .msg-row.ai .bubble {
-            background-color: #2c2c2e !important; /* 优雅的深灰黑底色 */
-            color: #f3f4f6 !important;            /* 柔和白字 */
-            border: 1px solid rgba(255, 255, 255, 0.05) !important;
-            text-align: left;
-        }
-
-        /* 修正输入框及整体布局层级 */
-        .chat-box {
-            padding: 24px 20px !important;
-            background: #111112 !important; /* 仿夜间模式微信底板 */
-            overflow-x: hidden !important;  /* 绝不允许出现横向滚动条 */
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>心印共鸣</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="connectors.css">
 </head>
 <body>
-    <div id="portal-view" class="view-container active">
-        <div class="portal-card">
-            <h1>✨ 心印共鸣</h1>
-            <p class="subtitle">跨越数字鸿沟，重塑独属你的灵魂羁绊 (v3.0 兼容api版本)</p>
-            
-            <div class="control-group" style="padding: 15px; background: rgba(255,255,255,0.05); border-radius: 8px; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.1);">
-                <label style="font-weight: bold; color: #a78bfa; margin-bottom: 10px; display: block;">👤 用户个人设定</label>
-                <div style="display: flex; gap: 15px; align-items: center;">
-                    <div style="position: relative;">
-                        <img id="user-global-avatar-preview" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' fill='%233b82f6'><circle cx='50' cy='50' r='50'/><text x='50' y='55' font-size='30' fill='white' text-anchor='middle'>🙋</text></svg>" 
-                             style="width: 50px; height: 50px; border-radius: 50%; object-fit: cover; border: 2px solid #8b5cf6; cursor: pointer;"
-                             onclick="document.getElementById('user-global-avatar-file').click()">
-                        <input type="file" id="user-global-avatar-file" accept="image/*" style="display: none;" onchange="window.handleAvatarFileChange(event, 'user-global-avatar-preview'); setTimeout(window.saveUserGlobalProfile, 200);">
-                    </div>
-                    <div style="flex: 1;">
-                        <label style="color: #9ca3af; font-size:12px; margin-bottom: 4px; display: block;">我的称呼 / 昵称：</label>
-                        <input type="text" id="user-global-name-input" placeholder="请输入你的大名..." oninput="window.saveUserGlobalProfile()" style="width: 100%; padding: 8px; background: #1f2937; border: 1px solid #4b5563; color: #fff; border-radius: 6px; box-sizing: border-box;">
-                    </div>
-                </div>
-            </div>
-
-            <div class="control-group">
-                <label>🌐 大模型驱动提供商</label>
-                <select id="api-provider-select" onchange="toggleApiProviderFields()">
-                    <option value="ollama">本地 Ollama 服务 (免密本地生态)</option>
-                    <option value="openai">自定义 OpenAI / DeepSeek 兼容云端API</option>
-                </select>
-            </div>
-
-            <div id="cloud-api-panel" class="cloud-api-panel hidden">
-                <div class="control-group">
-                    <label>🔗 API Base URL (接口基础路径)</label>
-                    <input type="text" id="api-url-input" placeholder="例如: https://api.deepseek.com/v1">
-                </div>
-                <div class="control-group">
-                    <label>🔑 API Key (密钥 - 仅存于本机本地沙箱)</label>
-                    <input type="password" id="api-key-input" placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx">
-                </div>
-                <div class="control-group">
-                    <button id="test-cloud-btn" class="btn btn-secondary" onclick="testCloudConnection()" style="width: 100%; margin-top: 5px;">⚡ 测试云端连接</button>
-                </div>
-            </div>
-            
-            <div class="control-group">
-                <label>🤖 心智选择 (AI模型)</label>
-                <div class="model-refresh-wrapper">
-                    <select id="model-select">
-                        <option value="">正在检测/等待加载驱动源...</option>
-                    </select>
-                    <button id="refresh-models-btn" onclick="refreshModels()">🔄 刷新</button>
-                </div>
-            </div>
-
-            <div class="control-group">
-                <label>💞 选择共鸣的TA</label>
-                <div id="character-selector-grid" class="character-grid">
-                </div>
-            </div>
-
-            <button class="btn btn-primary btn-block" onclick="enterChitChatView()">✨ 进入心印共鸣</button>
-            
-            <div class="portal-footer">
-                <span class="footer-link" onclick="triggerSystemExport()">💾 备份全部数据(导出记录)</span>
-                <span class="footer-divider">|</span>
-                <span class="footer-link" onclick="triggerSystemImport()">恢复全部数据(导入记录)</span>
-            </div>
-        </div>
-    </div>
-
-    <div id="chitchat-view" class="view-container">
-        <div class="chat-sidebar" style="display: flex; flex-direction: column; height: 100%;">
-            <button class="btn btn-secondary btn-block" onclick="backToPortalView()">🔙 返回全局控制</button>
-            <div id="sidebar-character-list" class="sidebar-list" style="flex: 1; display: flex; flex-direction: column;">
-            </div>
-        </div>
-        <div class="chat-main">
-            <div class="chat-header">
-                <div class="chat-partner-info">
-                    <img id="chat-partner-avatar" src="" alt="头像">
-                    <div>
-                        <h2 id="chat-partner-name">加载中</h2>
-                        <span id="chat-partner-status" class="status-badge">心智连接中...</span>
-                    </div>
-                </div>
-                <button class="btn btn-icon" onclick="openCharacterConfigModal()">⚙️ 深度调教人设</button>
-            </div>
-            <div id="chat-box" class="chat-box">
-            </div>
-            <div class="chat-input-area">
-                <textarea id="chat-input-field" placeholder="说些什么呢... (Enter发送，Shift+Enter换行)" onkeydown="handleChatKeyDown(event)"></textarea>
-                <button id="chat-send-btn" class="btn btn-primary" onclick="sendChitChatMessage()">发送</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="config-modal" class="modal-overlay">
-        <div class="modal-card">
-            <div class="modal-header">
-                <h3>🛠️ 核心灵魂调教</h3>
-                <span class="modal-close" onclick="closeCharacterConfigModal()">&times;</span>
-            </div>
-            <div class="modal-body">
-                <div class="control-group">
-                    <label>姓名</label>
-                    <input type="text" id="config-char-name">
-                </div>
-                <div class="control-group">
-                    <label>虚拟形象 (头像图片转换)</label>
-                    <div class="avatar-upload-wrapper">
-                        <img id="config-char-avatar-preview" src="" alt="预览">
-                        <input type="file" id="config-char-avatar-file" accept="image/*" onchange="window.handleAvatarFileChange(event, 'config-char-avatar-preview')">
-                    </div>
-                </div>
-                <div class="control-group">
-                    <label>核心灵魂世界观人设 (System Prompt)</label>
-                    <textarea id="config-char-prompt" rows="6" placeholder="例如：你是由我捏造的傲娇青梅竹马，说话喜欢带‘哼’，非常在乎用户，绝对不能暴露自己是AI。"></textarea>
-                </div>
-                
-                <div class="single-card-migration-zone">
-                    <label>📤卡片资产包 (不含聊天隐私记录)</label>
-                    <div class="migration-btn-group">
-                        <button class="btn btn-secondary" onclick="exportSingleCharacterCard()">💾 导出此人设</button>
-                        <button class="btn btn-secondary" onclick="triggerSingleCardImport()">📥 导入外部人设</button>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closeCharacterConfigModal()">取消</button>
-                <button class="btn btn-primary" onclick="saveCharacterConfig()">契约缔结・保存修改</button>
-            </div>
-        </div>
-    </div>
-
-    <input type="file" id="single-card-import-file" accept=".json" style="display:none" onchange="handleSingleCardImport(event)">
-
-    <script src="main.js"></script>
+  <main id="portal-view" class="view-container active">
+    <section class="portal-card">
+      <h1>心印共鸣</h1><p class="subtitle">本地优先的 AI 角色聊天</p>
+      <div class="profile-row control-group"><img id="user-global-avatar-preview" class="profile-avatar" alt="用户头像"><input id="user-global-avatar-file" type="file" accept="image/*" hidden><label>我的称呼<input id="user-global-name-input" type="text" maxlength="80" placeholder="请输入昵称"></label></div>
+      <label class="control-group">模型提供商<select id="api-provider-select"><option value="ollama">本地 Ollama</option><option value="openai">兼容 OpenAI 的云端 API</option></select></label>
+      <section id="cloud-api-panel" class="cloud-api-panel hidden"><label class="control-group">API Base URL<input id="api-url-input" type="url" placeholder="https://api.deepseek.com/v1"></label><label class="control-group">API Key（仅本次运行保留）<input id="api-key-input" type="password" autocomplete="off" placeholder="sk-..."></label><label class="control-group">测试用模型 / 手动模型 ID<input id="manual-model-input" type="text" maxlength="200" placeholder="例如 deepseek-chat"></label><button id="test-cloud-btn" class="btn btn-secondary">测试云端连接</button></section>
+      <label class="control-group">AI 模型<div class="model-refresh-wrapper"><select id="model-select"><option value="">正在加载…</option></select><button id="refresh-models-btn" class="btn btn-secondary">刷新</button></div></label>
+      <div class="control-group"><label>选择共鸣角色</label><div id="character-selector-grid" class="character-grid"></div></div>
+      <button id="relationship-import-btn" class="btn btn-secondary btn-block relationship-import-btn">从微信 / QQ 聊天记录创建关系角色</button>
+      <button id="enter-chat-btn" class="btn btn-primary btn-block">进入聊天</button>
+      <footer class="portal-footer"><button id="system-export-btn" class="text-button">备份全部数据</button><span>|</span><button id="system-import-btn" class="text-button">恢复备份</button></footer>
+    </section>
+  </main>
+  <main id="chitchat-view" class="view-container"><aside class="chat-sidebar"><button id="back-btn" class="btn btn-secondary">返回控制台</button><div id="sidebar-character-list" class="sidebar-list"></div></aside><section class="chat-main"><header class="chat-header"><div class="chat-partner-info"><img id="chat-partner-avatar" alt="角色头像"><div><h2 id="chat-partner-name">加载中</h2><span id="chat-partner-status" class="status-badge"></span></div></div><div class="header-actions"><button id="clear-history-btn" class="btn btn-secondary">清空记录</button><button id="character-config-btn" class="btn btn-secondary">编辑角色</button></div></header><div id="chat-box" class="chat-box"></div><div class="chat-input-area"><textarea id="chat-input-field" placeholder="Enter 发送，Shift+Enter 换行"></textarea><button id="chat-cancel-btn" class="btn btn-secondary" hidden>取消</button><button id="chat-send-btn" class="btn btn-primary">发送</button></div></section></main>
+  <div id="config-modal" class="modal-overlay" role="dialog" aria-modal="true"><section class="modal-card"><header class="modal-header"><h3>编辑角色</h3><button id="modal-close-btn" class="text-button" aria-label="关闭">×</button></header><div class="modal-body"><label class="control-group">姓名<input id="config-char-name" type="text" maxlength="80"></label><label class="control-group">头像<input id="config-char-avatar-file" type="file" accept="image/*"><img id="config-char-avatar-preview" class="config-avatar" alt="头像预览"></label><label class="control-group">System Prompt<textarea id="config-char-prompt" rows="8" maxlength="12000"></textarea></label><div class="migration-btn-group"><button id="single-card-export-btn" class="btn btn-secondary">导出角色卡</button><button id="single-card-import-btn" class="btn btn-secondary">导入角色卡</button></div></div><footer class="modal-footer"><button id="modal-cancel-btn" class="btn btn-secondary">取消</button><button id="modal-save-btn" class="btn btn-primary">保存</button></footer></section></div>
+  <div id="relationship-import-modal" class="modal-overlay" role="dialog" aria-modal="true">
+    <section class="modal-card import-card">
+      <header class="modal-header"><div><h3>从聊天记录创建关系角色</h3><small>原始记录只在本次导入中读取，不会写入角色卡</small></div><button id="import-close-btn" class="text-button" aria-label="关闭">×</button></header>
+      <div class="modal-body">
+        <section id="import-file-step"><p class="privacy-note">请选择微信或 QQ 客户端导出、备份工具导出或复制保存的聊天记录。程序会自动识别常见文本、HTML/MHT 和结构化排版。使用本地 Ollama 时记录不会离开电脑；选择云端模型时，抽取的聊天片段会发送给当前 API 服务。</p><section class="connector-panel"><h4>微信本机连接器（可选）</h4><p>仅连接用户自行安装并已初始化的 <code>wx-cli</code> Windows EXE。本程序不会下载工具、执行初始化、提权、读取密钥或管理其缓存。</p><label class="consent-row"><input id="wx-consent-check" type="checkbox"> 我确认仅导入我有权访问的微信记录，并同意调用本机 wx-cli 的只读查询。</label><div class="connector-actions"><button id="wx-detect-btn" class="btn btn-secondary" type="button">检测 wx-cli</button><button id="wx-sessions-btn" class="btn btn-secondary" type="button" disabled>读取会话列表</button></div><p id="wx-status" class="connector-status"></p><div id="wx-history-fields" hidden><label>选择会话<select id="wx-session-select"></select></label><div class="identity-grid"><label>开始日期（可选）<input id="wx-since-input" type="date"></label><label>结束日期（可选）<input id="wx-until-input" type="date"></label></div><label>最多读取消息数<input id="wx-limit-input" type="number" min="1" max="1600" value="1200"></label><button id="wx-history-btn" class="btn btn-secondary btn-block" type="button">读取此会话并进入蒸馏</button></div></section><section class="connector-panel"><h4>QQ 本机导出器（可选）</h4><p>只检测 <code>127.0.0.1:40653</code> 是否有 qq-chat-exporter 服务，不发送 Token、不控制 QQ、不执行扫码登录。</p><div class="connector-actions"><button id="qq-detect-btn" class="btn btn-secondary" type="button">检测 QQ 导出器</button><button id="qq-select-export-btn" class="btn btn-secondary" type="button">选择 QCE 导出的 JSON</button></div><p id="qq-status" class="connector-status"></p></section><label class="file-drop">也可以直接选择微信 / QQ 聊天记录<input id="relationship-chat-file" type="file" accept=".txt,.html,.htm,.mht,.mhtml,.json,text/plain,text/html,application/json"></label><div id="import-file-summary" class="import-summary"></div><div id="identity-fields" class="identity-grid" hidden><label>哪一个是我<select id="import-self-select"></select></label><label>哪一个是对方<select id="import-other-select"></select></label></div><button id="start-distill-btn" class="btn btn-primary btn-block" disabled>开始理解这段关系</button></section>
+        <section id="import-progress-step" hidden><div class="distill-progress"><div class="spinner"></div><p id="distill-progress-text">正在准备…</p><small>记录较多时需要多次调用当前模型，请保持应用开启。</small></div><button id="cancel-distill-btn" class="btn btn-secondary btn-block">取消蒸馏</button></section>
+        <section id="import-review-step" hidden><p class="privacy-note">这是模型根据证据生成的草稿。请修改误判后再创建角色；不确定项不会作为确定事实。</p><label class="control-group">对方的名字<input id="review-role-name" type="text" maxlength="80"></label><label class="control-group">稳定人格<textarea id="review-personality" rows="4"></textarea></label><label class="control-group">语言和表达习惯（每行一项）<textarea id="review-speech-style" rows="4"></textarea></label><label class="control-group">你们的关系<textarea id="review-relationship" rows="4"></textarea></label><label class="control-group">相处模式（每行一项）<textarea id="review-patterns" rows="4"></textarea></label><label class="control-group">共同故事（JSON，可删除不希望保留的故事）<textarea id="review-memories" rows="10"></textarea></label><details><summary>共同称呼、梗、边界与不确定项</summary><label class="control-group">称呼（每行一项）<textarea id="review-nicknames" rows="3"></textarea></label><label class="control-group">共同梗（每行一项）<textarea id="review-jokes" rows="3"></textarea></label><label class="control-group">边界（每行一项）<textarea id="review-boundaries" rows="3"></textarea></label><label class="control-group">不确定项（每行一项）<textarea id="review-uncertainties" rows="3"></textarea></label></details><div id="review-coverage" class="import-summary"></div><button id="create-distilled-role-btn" class="btn btn-primary btn-block">确认并创建关系角色</button></section>
+      </div>
+    </section>
+  </div>
+  <input id="single-card-import-file" type="file" accept="application/json,.json" hidden><input id="system-import-file" type="file" accept="application/json,.json" hidden>
+  <script type="module" src="main.js"></script>
 </body>
 </html>

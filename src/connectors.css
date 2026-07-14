@@ -1,0 +1,15 @@
+.connector-panel {
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #0002;
+}
+
+.connector-panel h4 { margin: .1rem 0 .5rem; }
+.connector-panel p { color: var(--muted); line-height: 1.5; }
+.connector-panel code { color: #c4b5fd; }
+.connector-actions { display: flex; gap: .5rem; margin: .75rem 0; }
+.consent-row { display: flex; gap: .6rem; align-items: flex-start; color: var(--muted); line-height: 1.4; }
+.consent-row input { width: auto; margin: .2rem 0 0; }
+.connector-status { min-height: 1.4rem; overflow-wrap: anywhere; }
