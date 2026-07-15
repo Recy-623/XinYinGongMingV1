@@ -29,3 +29,19 @@
 安装包：`distill-chat-relationship/心印共鸣-聊天关系判断转折分析与角色卡.skill`
 
 SHA-256：`32388020958B83AA347B52F77608310697980CE50493F0FBE18C85B5835EA1AC`
+
+### qq-chat-backup-recovery
+
+在用户明确授权和本地处理的前提下，把电脑 QQ 保存的手机聊天备份恢复到隔离的 Android 模拟器，制作只读数据库快照，导出指定联系人的心印共鸣 JSON，并验证角色创建链路。
+
+该技能内置凭据保护、原始备份只读、模拟器隔离、工具来源校验和禁止注入/内存扫描等安全边界。
+
+调用示例：
+
+```text
+使用 $qq-chat-backup-recovery 把我已备份到电脑的手机 QQ 聊天恢复、提取并导入心印共鸣。
+```
+
+安装包：`qq-chat-backup-recovery/心印共鸣预备-QQ聊天记录提取并导入软件.skill`
+
+SHA-256：`B20C082C4A5910F252D83650E01BDAAA1ED045FF511F030DD42079B2E2E3EB35`

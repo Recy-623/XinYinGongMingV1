@@ -1,0 +1,4 @@
+interface:
+  display_name: "QQ 手机聊天备份恢复与角色蒸馏"
+  short_description: "安全恢复 QQ 备份并导出为心印共鸣角色数据"
+  default_prompt: "请使用 $qq-chat-backup-recovery，检查我准备好的手机 QQ 电脑备份，恢复到隔离模拟器，导出指定联系人的聊天，并在本地心印共鸣中创建和验证角色。遇到登录、扫码、验证码或设备确认时暂停让我本人处理。"
