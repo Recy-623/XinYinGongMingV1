@@ -1,0 +1,4 @@
+interface:
+  display_name: "聊天关系蒸馏与心印角色卡"
+  short_description: "从聊天判断双方关系、定位转折时间并生成可导入角色卡"
+  default_prompt: "使用 $distill-chat-relationship 分析这份双方聊天记录，给出一句话关系判断、转折时间线并生成心印共鸣角色卡。"
