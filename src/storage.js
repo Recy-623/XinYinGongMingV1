@@ -1,10 +1,28 @@
-import { BACKUP_VERSION, CARD_VERSION, createDefaultState, defaultAvatar, LEGACY_STORAGE_KEY, STORAGE_KEY } from "./constants.js";
+import { BACKUP_VERSION, CARD_VERSION, createDefaultState, defaultAvatar, LEGACY_STORAGE_KEYS, MAX_SYSTEM_PROMPT_LENGTH, STORAGE_KEY } from "./constants.js";
+import { normalizeRelationshipPreset } from "./relationship-presets.js";
+import { normalizeTimeline } from "./time-travel.js";
 
 const MAX_CHARACTERS = 100;
 const MAX_HISTORY_PER_CHARACTER = 500;
 
 function text(value, maxLength) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
+}
+
+function normalizeSystemPrompt(value) {
+  if (typeof value !== "string") return "";
+  const raw = value.trim();
+  const looksLikeEmbeddedCard = raw.startsWith("{") || /^"systemPrompt"\s*:/.test(raw);
+  if (looksLikeEmbeddedCard) {
+    try {
+      const embedded = JSON.parse(raw.startsWith("{") ? raw : `{${raw}`);
+      const recovered = text(embedded?.systemPrompt, MAX_SYSTEM_PROMPT_LENGTH);
+      if (recovered) return recovered;
+    } catch {
+      // Keep ordinary brace-led prompts and incomplete pasted text unchanged.
+    }
+  }
+  return text(raw, MAX_SYSTEM_PROMPT_LENGTH);
 }
 
 export function isSafeAvatar(value) {
@@ -40,11 +58,19 @@ function normalizeMemories(value) {
   });
 }
 
+function normalizeRelationshipEvidence(value) {
+  return {
+    observedStage: text(value?.observedStage, 300),
+    summary: text(value?.summary, 3000),
+    confidence: Math.max(0, Math.min(1, Number(value?.confidence) || 0)),
+  };
+}
+
 export function normalizeCharacter(value) {
   const name = text(value?.name, 80);
-  const systemPrompt = text(value?.systemPrompt, 12_000);
+  const systemPrompt = normalizeSystemPrompt(value?.systemPrompt);
   if (!name || !systemPrompt) return null;
-  return {
+  const character = {
     id: text(value.id, 100) || `char_${crypto.randomUUID()}`,
     name,
     avatar: isSafeAvatar(value.avatar) ? value.avatar : defaultAvatar,
@@ -58,6 +84,8 @@ export function normalizeCharacter(value) {
     },
     relationship: {
       summary: text(value.relationship?.summary, 6000),
+      preset: normalizeRelationshipPreset(value.relationship?.preset),
+      evidence: normalizeRelationshipEvidence(value.relationship?.evidence),
       interactionPatterns: stringList(value.relationship?.interactionPatterns),
       nicknames: stringList(value.relationship?.nicknames),
       sharedJokes: stringList(value.relationship?.sharedJokes),
@@ -68,9 +96,11 @@ export function normalizeCharacter(value) {
       totalMessages: Number(value.sourceMetadata.totalMessages) || 0,
       analyzedMessages: Number(value.sourceMetadata.analyzedMessages) || 0,
       selfName: text(value.sourceMetadata.selfName, 100), otherName: text(value.sourceMetadata.otherName, 100),
-      distilledAt: text(value.sourceMetadata.distilledAt, 100),
+      distilledAt: text(value.sourceMetadata.distilledAt, 100), sourceStart: text(value.sourceMetadata.sourceStart, 100), sourceEnd: text(value.sourceMetadata.sourceEnd, 100),
     } : null,
   };
+  character.timeline = normalizeTimeline(value.timeline, character);
+  return character;
 }
 
 export function normalizeState(raw) {
@@ -83,7 +113,7 @@ export function normalizeState(raw) {
   const selectedProvider = globals.selectedProvider === "openai" ? "openai" : "ollama";
   const activeCharacterId = text(raw.activeCharacterId, 100);
   return {
-    version: 4,
+    version: 5,
     globals: {
       userName: text(globals.userName, 80) || fallback.globals.userName,
       userAvatar: isSafeAvatar(globals.userAvatar) ? globals.userAvatar : fallback.globals.userAvatar,
@@ -102,7 +132,7 @@ export function loadState() {
   // V3 stored cloud credentials in WebView localStorage. Remove that legacy
   // plaintext value as soon as V4 starts; credentials are session-only now.
   localStorage.removeItem("xinyingongming_secure_apikey");
-  for (const key of [STORAGE_KEY, LEGACY_STORAGE_KEY]) {
+  for (const key of [STORAGE_KEY, ...LEGACY_STORAGE_KEYS]) {
     try {
       const raw = localStorage.getItem(key);
       if (raw) return normalizeState(JSON.parse(raw));
@@ -122,17 +152,17 @@ export function serializeBackup(state) {
 }
 
 export function readBackup(value) {
-  if (!value || value.version !== BACKUP_VERSION) throw new Error("不是受支持的完整备份文件");
+  if (!value || ![BACKUP_VERSION, "xinyin-backup-v4"].includes(value.version)) throw new Error("不是受支持的完整备份文件");
   return normalizeState(value.state);
 }
 
 export function serializeCard(character) {
   const normalized = normalizeCharacter(character);
   if (!normalized) throw new Error("角色数据不完整");
-  return JSON.stringify({ version: CARD_VERSION, ...normalized, history: [] }, null, 2);
+  return JSON.stringify({ version: CARD_VERSION, ...normalized, history: [], timeline: { ...normalized.timeline, branches: [], activeBranchId: "" } }, null, 2);
 }
 
 export function readCard(value) {
-  if (!value || ![CARD_VERSION, "xinyin-card-v3"].includes(value.version)) throw new Error("不是受支持的角色卡文件");
-  return normalizeCharacter({ ...value, history: [] });
+  if (!value || ![CARD_VERSION, "xinyin-card-v4", "xinyin-card-v3"].includes(value.version)) throw new Error("不是受支持的角色卡文件");
+  return normalizeCharacter({ ...value, history: [], timeline: value.timeline ? { ...value.timeline, branches: [], activeBranchId: "" } : null });
 }

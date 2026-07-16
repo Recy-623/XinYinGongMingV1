@@ -12,6 +12,58 @@ dist
 dist-ssr
 *.local
 
+# XinYin private user data (never commit)
+# Keep personal cards, full backups, extracted chats, and database snapshots
+# outside source control. Generic schema/docs under skill/ remain trackable.
+*xinyin-card*.json
+*角色卡*.json
+*xinyin-backup*.json
+*xinyin-branch*.json
+*模拟分支*.json
+心印共鸣-备份-*.json
+*聊天记录*.json
+
+角色卡/
+**/角色卡/
+personal-cards/
+**/personal-cards/
+character-cards/
+**/character-cards/
+# Personal persona-card folders (Chinese naming)
+人设卡/
+**/人设卡/
+private/
+private-data/
+local-data/
+chat-exports/
+chat-backups/
+qq-android-extract/
+**/private-data/
+**/local-data/
+**/chat-exports/
+**/chat-backups/
+**/qq-android-extract/
+
+# Raw chat exports and messaging databases
+*.mht
+*.mhtml
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3
+
+# Credentials and local connector binaries
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+connectors/*.exe
+connectors/*.dll
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

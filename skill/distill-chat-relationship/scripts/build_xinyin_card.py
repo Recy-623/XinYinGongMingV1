@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 CARD_VERSION = "xinyin-card-v4"
+MAX_SYSTEM_PROMPT_LENGTH = 50_000
 DEFAULT_AVATAR = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' fill='%239ca3af'><circle cx='50' cy='50' r='50'/><text x='50' y='60' font-size='42' fill='white' text-anchor='middle'>?</text></svg>"
 PRESETS = {
     "unspecified": "不预设（只依据聊天记录）。不添加额外的关系取向。",
@@ -116,7 +117,7 @@ def build(profile: dict[str, Any]) -> dict[str, Any]:
         "id": text(profile.get("id"), 100) or f"char_{uuid.uuid4()}",
         "name": name,
         "avatar": DEFAULT_AVATAR,
-        "systemPrompt": system_prompt[:12000],
+        "systemPrompt": system_prompt[:MAX_SYSTEM_PROMPT_LENGTH],
         "history": [],
         "profile": {"personality": personality, "speechStyle": speech, "boundaries": text_list(profile.get("boundaries")), "uncertainties": text_list(profile.get("uncertainties"))},
         "relationship": {"summary": relationship_summary, "preset": preset, "evidence": evidence, "interactionPatterns": text_list(profile.get("interactionPatterns")), "nicknames": text_list(profile.get("nicknames")), "sharedJokes": text_list(profile.get("sharedJokes"))},
@@ -130,7 +131,7 @@ def validate(card: dict[str, Any]) -> None:
         raise ValueError("角色卡版本错误")
     if not text(card.get("id"), 100).startswith("char_"):
         raise ValueError("角色 ID 必须以 char_ 开头")
-    if not text(card.get("name"), 80) or not text(card.get("systemPrompt"), 12000):
+    if not text(card.get("name"), 80) or not text(card.get("systemPrompt"), MAX_SYSTEM_PROMPT_LENGTH):
         raise ValueError("角色名或 systemPrompt 缺失")
     if card.get("history") != []:
         raise ValueError("history 必须为空")

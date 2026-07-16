@@ -1,6 +1,6 @@
 {
   "$schema": "./target/schema.json",
-  "version": "0.1.0",
+  "version": "0.5.2",
   "identifier": "com.xinying.gongming",
   "productName": "心印共鸣",
   "build": {
@@ -13,7 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "心印共鸣",
+        "title": "心印共鸣 V5.2 · 刻舟求剑",
         "width": 800,
         "height": 600
       }
