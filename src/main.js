@@ -5,8 +5,16 @@ import { distillRelationship } from "./distillation.js";
 import { addOption, clear, downloadJson, element, readFileAsText, setAvatar } from "./dom.js";
 import { chatWithCloud, chatWithOllama, listCloudModels, listOllamaModels, normalizeBaseUrl, testCloud } from "./providers.js";
 import { isCustomRelationshipPreset, normalizeRelationshipPreset, relationshipPresetForPrompt, relationshipPresetHint } from "./relationship-presets.js";
-import { loadState, readBackup, readCard, saveState, serializeBackup, serializeCard } from "./storage.js";
+import { loadState, normalizeState, normalizeWorldbook, readBackup, readCard, saveState, serializeBackup, serializeCard } from "./storage.js";
 import { activeBranch, activeHistory, BRANCH_MODES, branchSystemPrompt, checkpointForBranch, compareBranches, createBranch, displayTime, forkBranchAtTurn, normalizeTimeline, recordBranchTurn, removeBranch, renameBranch, serializeBranch, timelineFromDistillation } from "./time-travel.js";
+import {
+  clearMemories, deleteCharacterData, deleteMemory, listMemories, loadDatabaseState, markMemoriesUsed,
+  queueDatabaseStateSave, updateMemoryLifecycle, upsertMemories,
+} from "./data/database.js";
+import {
+  normalizeMemory, parseMemoryExtraction, rankRelevantMemories, shouldExtractMemory,
+} from "./memory/companion-memory.js";
+import { worldbookContext } from "./worldbook/retriever.js";
 
 let state = loadState();
 let isEditMode = false;
@@ -16,7 +24,10 @@ let importSession = { parsed: null, result: null, controller: null };
 let wxCliDetected = false;
 
 const $ = (id) => document.getElementById(id);
-const save = () => saveState(state);
+const save = () => {
+  saveState(state);
+  queueDatabaseStateSave(state).catch((error) => console.warn("SQLite 保存失败，已保留兼容存储", error));
+};
 const activeCharacter = () => state.characters.find((character) => character.id === state.activeCharacterId);
 const activeConversationHistory = (character = activeCharacter()) => activeHistory(character);
 const safeFileName = (value) => value.replace(/[\\/:*?"<>|]/g, "_").slice(0, 50);
@@ -57,6 +68,7 @@ function deleteActiveCharacter() {
     : "";
   if (!confirm(`确定删除角色“${character.name}”吗？${detail}\n删除后无法恢复，除非你已经导出备份。`)) return;
   removeCharacterFromState(state, character.id);
+  deleteCharacterData(character.id).catch((error) => console.warn("角色记忆清理失败", error));
   save();
   renderCharacterSelectors();
 }
@@ -190,6 +202,7 @@ function backToPortalView() {
 function openCreateCharacterModal() {
   isEditMode = false; $("config-char-name").value = ""; $("config-char-prompt").value = "";
   setAvatar($("config-char-avatar-preview"), defaultAvatar); $("config-char-avatar-file").value = "";
+  $("worldbook-status").textContent = "未关联世界观";
   $("config-modal").classList.add("active");
 }
 
@@ -197,6 +210,7 @@ function openCharacterConfigModal() {
   const character = activeCharacter(); if (!character) return;
   isEditMode = true; $("config-char-name").value = character.name; $("config-char-prompt").value = character.systemPrompt;
   setAvatar($("config-char-avatar-preview"), character.avatar); $("config-char-avatar-file").value = "";
+  $("worldbook-status").textContent = character.worldbook ? `已关联：${character.worldbook.title}（${character.worldbook.entries.length} 条）` : "未关联世界观";
   $("config-modal").classList.add("active");
 }
 
@@ -207,11 +221,32 @@ function saveCharacterConfig() {
   if (isEditMode) Object.assign(activeCharacter(), { name, systemPrompt, avatar });
   else {
     const id = `char_${crypto.randomUUID()}`;
-    const character = { id, name, avatar, systemPrompt, history: [], profile: {}, relationship: {}, memories: [], sourceMetadata: null };
+    const character = { id, name, avatar, systemPrompt, history: [], profile: {}, relationship: {}, memories: [], worldbook: null, sourceMetadata: null };
     character.timeline = normalizeTimeline(null, character); state.characters.push(character); state.activeCharacterId = id;
   }
   save(); $("config-modal").classList.remove("active"); renderCharacterSelectors();
   if ($("chitchat-view").classList.contains("active")) { syncChatSidebarList(); loadCharacterChatDialogue(); }
+}
+
+async function handleWorldbookImport(event) {
+  try {
+    const character = activeCharacter();
+    if (!isEditMode || !character) throw new Error("请先保存新角色，再为它导入世界观。");
+    const value = JSON.parse(await readFileAsText(event.target.files?.[0]));
+    const worldbook = normalizeWorldbook(value);
+    if (!worldbook) throw new Error("不是有效的 xinyin-worldbook-v1 文件。");
+    character.worldbook = worldbook;
+    character.worldbookRef = { id: worldbook.id, title: worldbook.title, version: worldbook.version };
+    save();
+    $("worldbook-status").textContent = `已关联：${worldbook.title}（${worldbook.entries.length} 条）`;
+  } catch (error) { alert(error.message || "世界观导入失败"); }
+  finally { event.target.value = ""; }
+}
+
+function removeWorldbook() {
+  const character = activeCharacter(); if (!isEditMode || !character) return;
+  character.worldbook = null; character.worldbookRef = null; save();
+  $("worldbook-status").textContent = "未关联世界观";
 }
 
 async function optimizeAvatarSource(source, maxSide = 256) {
@@ -577,13 +612,133 @@ function relationshipContext(character, userText) {
   if (!character?.relationship && !character?.profile) return "";
   const profile = character.profile || {}; const relationship = character.relationship || {};
   const relationshipEvidence = relationship.evidence || {};
-  const terms = [...new Set([...userText.matchAll(/[\p{L}\p{N}]{2,}/gu)].map((match) => match[0]))];
-  const ranked = (character.memories || []).map((memory) => {
-    const haystack = `${memory.title} ${memory.summary} ${memory.emotionalMeaning} ${(memory.keywords || []).join(" ")}`;
-    const score = terms.reduce((total, term) => total + (haystack.includes(term) ? 2 : 0), 0) + (memory.keywords || []).reduce((total, keyword) => total + (userText.includes(keyword) ? 3 : 0), 0);
-    return { memory, score };
-  }).filter((item) => item.score > 0).sort((a, b) => b.score - a.score).slice(0, 5).map(({ memory }) => `- [${memory.time || "时间未知"}] ${memory.title}：${memory.summary}${memory.emotionalMeaning ? `（意义：${memory.emotionalMeaning}）` : ""}`);
-  return `\n\n【关系档案】\n人格：${profile.personality || "未记录"}\n表达习惯：${(profile.speechStyle || []).join("；")}\n聊天证实的关系：${relationship.summary || "未记录"}\n证据阶段：${relationshipEvidence.observedStage || "未记录"}\n证据摘要：${relationshipEvidence.summary || "未记录"}\n相处预设（用户偏好，非现实事实）：\n${relationshipPresetForPrompt(relationship.preset)}\n相处模式：${(relationship.interactionPatterns || []).join("；")}\n共同称呼与梗：${[...(relationship.nicknames || []), ...(relationship.sharedJokes || [])].join("；")}\n边界：${(profile.boundaries || []).join("；")}\n不确定信息不得当作事实：${(profile.uncertainties || []).join("；")}\n${ranked.length ? `与当前话题相关的共同记忆：\n${ranked.join("\n")}` : "当前没有检索到明确相关的共同记忆。"}`;
+  void userText;
+  return `\n\n【关系档案】\n人格：${profile.personality || "未记录"}\n表达习惯：${(profile.speechStyle || []).join("；")}\n聊天证实的关系：${relationship.summary || "未记录"}\n证据阶段：${relationshipEvidence.observedStage || "未记录"}\n证据摘要：${relationshipEvidence.summary || "未记录"}\n相处预设（用户偏好，非现实事实）：\n${relationshipPresetForPrompt(relationship.preset)}\n相处模式：${(relationship.interactionPatterns || []).join("；")}\n共同称呼与梗：${[...(relationship.nicknames || []), ...(relationship.sharedJokes || [])].join("；")}\n边界：${(profile.boundaries || []).join("；")}\n不确定信息不得当作事实：${(profile.uncertainties || []).join("；")}\n共同记忆由本机数据库按当前话题另行检索。`;
+}
+
+async function companionMemoryContext(character, userText) {
+  try {
+    const selected = rankRelevantMemories(await listMemories(character.id, 300), userText);
+    markMemoriesUsed(selected.map((item) => item.id)).catch(() => {});
+    if (!selected.length && !character.contextState?.sceneSummary) return "";
+    const memories = selected.map((item) => `- ${item.summary}`).join("\n");
+    const relationshipStage = character.contextState?.confirmedRelationshipStage
+      ? `用户已确认的关系阶段：${character.contextState.confirmedRelationshipStage}`
+      : character.contextState?.proposedRelationshipStage
+        ? `尚未确认的关系线索：${character.contextState.proposedRelationshipStage}。不得当作既成事实。`
+        : "";
+    return `\n\n【按当前话题检索到的长期上下文】\n${relationshipStage}\n${character.contextState?.sceneSummary ? `此前阶段摘要：${character.contextState.sceneSummary}` : ""}\n${memories ? `相关记忆：\n${memories}` : ""}\n只在自然相关时使用；不要无缘无故主动复述，也不要把未确认推断写成事实。`;
+  } catch (error) {
+    console.warn("长期记忆检索失败", error);
+    return "";
+  }
+}
+
+async function migrateCardMemories(character) {
+  const items = (character.memories || []).flatMap((memory) => {
+    if (!memory?.title || !memory?.summary) return [];
+    return [normalizeMemory({
+      characterId: character.id,
+      memoryType: "relationship",
+      summary: `${memory.title}：${memory.summary}${memory.emotionalMeaning ? `（意义：${memory.emotionalMeaning}）` : ""}`,
+      keywords: [memory.title, ...(memory.keywords || [])],
+      importance: 0.8,
+      confidence: memory.confidence || 0.8,
+      confirmed: true,
+      scope: "identity",
+      mentionPolicy: "relevant",
+      subjectKey: `card:${memory.title}`,
+    }, character.id)];
+  });
+  await upsertMemories(items);
+}
+
+async function maintainCompanionMemory(character, userText, signal) {
+  character.contextState ||= { sceneSummary: "", lastMemoryIndex: 0 };
+  const trigger = shouldExtractMemory({
+    userText,
+    history: character.history,
+    lastIndex: character.contextState.lastMemoryIndex,
+  });
+  if (!trigger.shouldExtract) return;
+  const segment = character.history.slice(character.contextState.lastMemoryIndex);
+  if (segment.length < 2) return;
+  const transcript = segment.slice(-24).map((item) => `${item.role === "user" ? "使用者" : "角色"}：${item.content}`).join("\n");
+  const prompt = `请整理一段长期陪伴对话，只返回严格 JSON：
+{"summary":"当前阶段摘要","relationshipProposal":"只有证据充分时才写关系阶段，否则留空","memories":[{"memoryType":"episodic|relationship|preference|open_loop","summary":"可在未来复用的简洁事实","keywords":[""],"importance":0.0,"confidence":0.0,"scope":"long_term|scene","mentionPolicy":"relevant|passive","subjectKey":""}]}
+规则：只保留使用者明确表达或双方确实发生的事项；不得把角色的猜测、用户未说出的心理、生理反应或模型自己编写的情节当成使用者事实；纠正信息应取代旧结论；普通流水账不保存；最多 6 条记忆。
+触发原因：${trigger.reasons.join("、")}
+<对话>
+${transcript}
+</对话>`;
+  const raw = state.globals.selectedProvider === "ollama"
+    ? await chatWithOllama(state.globals.selectedModel, [{ role: "user", content: prompt }], signal, { temperature: 0, num_predict: 900 })
+    : await chatWithCloud(state.globals.cloudApiUrl, sessionApiKey, state.globals.selectedModel, [{ role: "user", content: prompt }], signal);
+  const extraction = parseMemoryExtraction(raw, character.id);
+  if (extraction.summary) character.contextState.sceneSummary = extraction.summary;
+  if (extraction.relationshipProposal) character.contextState.proposedRelationshipStage = extraction.relationshipProposal;
+  character.contextState.lastMemoryIndex = character.history.length;
+  character.contextState.updatedAt = new Date().toISOString();
+  await upsertMemories(extraction.memories);
+  save();
+}
+
+async function openCompanionMemoryManager() {
+  const character = activeCharacter(); if (!character) return;
+  $("memory-scene-summary").textContent = character.contextState?.sceneSummary || "尚未生成阶段摘要。";
+  const proposed = character.contextState?.proposedRelationshipStage;
+  const confirmed = character.contextState?.confirmedRelationshipStage;
+  $("memory-relationship-state").textContent = confirmed
+    ? `已确认：${confirmed}`
+    : proposed ? `待确认提案：${proposed}` : "尚无关系阶段变化。";
+  $("memory-confirm-stage-btn").hidden = !proposed;
+  const list = $("memory-list"); clear(list);
+  $("memory-modal").classList.add("active");
+  try {
+    const memories = await listMemories(character.id, 300);
+    if (!memories.length) list.append(element("p", "privacy-note", "尚无长期记忆。系统只在明确约定、纠正、场景结束或上下文达到阈值时整理。"));
+    for (const memory of memories) {
+      const item = element("article", "memory-item");
+      const body = element("div");
+      body.append(element("strong", "", memory.summary), element("small", "", `${memory.memoryType} · ${memory.status || "active"} · 使用 ${memory.useCount || 0} 次`));
+      const controls = element("div", "header-actions");
+      const status = element("select");
+      [["active", "有效"], ["resolved", "已解决"], ["expired", "已过期"], ["superseded", "已取代"]]
+        .forEach(([value, label]) => addOption(status, value, label));
+      status.value = memory.status || "active";
+      const policy = element("select");
+      [["relevant", "相关时可提及"], ["passive", "仅被问到时"], ["never", "永不提及"]]
+        .forEach(([value, label]) => addOption(policy, value, label));
+      policy.value = memory.mentionPolicy || "relevant";
+      const apply = element("button", "btn btn-secondary", "应用");
+      apply.type = "button";
+      apply.addEventListener("click", async () => {
+        await updateMemoryLifecycle(memory.id, status.value, policy.value);
+        await openCompanionMemoryManager();
+      });
+      const remove = element("button", "btn btn-secondary", "删除");
+      remove.type = "button";
+      remove.addEventListener("click", async () => {
+        if (!confirm("删除这条长期记忆吗？")) return;
+        await deleteMemory(memory.id); await openCompanionMemoryManager();
+      });
+      controls.append(status, policy, apply, remove);
+      item.append(body, controls); list.append(item);
+    }
+  } catch (error) {
+    list.append(element("p", "privacy-note", `读取记忆失败：${error.message || "未知错误"}`));
+  }
+}
+
+async function clearCompanionMemories() {
+  const character = activeCharacter(); if (!character) return;
+  if (!confirm("清空当前角色的全部长期记忆和阶段摘要吗？聊天记录与角色卡不会删除。")) return;
+  await clearMemories(character.id);
+  character.contextState = {
+    sceneSummary: "", lastMemoryIndex: character.history.length,
+    proposedRelationshipStage: "", confirmedRelationshipStage: "", updatedAt: new Date().toISOString(),
+  };
+  save(); await openCompanionMemoryManager();
 }
 
 async function sendChitChatMessage() {
@@ -593,15 +748,18 @@ async function sendChitChatMessage() {
   input.value = ""; history.push({ role: "user", content }); if (branch) recordBranchTurn(branch); save(); appendChatBubble("user", content);
   const pendingRow = appendChatBubble("ai", "正在思考…"); const pendingBubble = pendingRow.querySelector(".bubble");
   const controller = new AbortController(); activeRequest = controller; $("chat-send-btn").disabled = true; $("chat-cancel-btn").hidden = false;
+  const retrievedContext = branch ? "" : await companionMemoryContext(character, content);
   const systemPrompt = branch
     ? branchSystemPrompt(character, branch, state.globals.userName)
-    : `${character.systemPrompt}\n当前交流的用户名字是：${state.globals.userName}。${relationshipContext(character, content)}`;
+    : `${character.systemPrompt}\n当前交流的用户名字是：${state.globals.userName}。${relationshipContext(character, content)}${retrievedContext}${worldbookContext(character.worldbook, `${content} ${character.contextState?.sceneSummary || ""}`)}`;
   const messages = [{ role: "system", content: systemPrompt }, ...history.slice(branch ? -30 : -20)];
   try {
     const reply = state.globals.selectedProvider === "ollama"
       ? await chatWithOllama(state.globals.selectedModel, messages, controller.signal)
       : await chatWithCloud(state.globals.cloudApiUrl, sessionApiKey, state.globals.selectedModel, messages, controller.signal);
     pendingBubble.textContent = reply; history.push({ role: "assistant", content: reply }); if (branch) recordBranchTurn(branch); save();
+    if (!branch) maintainCompanionMemory(character, content, controller.signal)
+      .catch((error) => console.warn("长期记忆整理失败，将在后续触发时重试", error));
   } catch (error) { pendingBubble.textContent = error.name === "AbortError" ? "已取消生成。" : `请求失败：${error.message || "未知错误"}`; }
   finally { activeRequest = null; $("chat-send-btn").disabled = false; $("chat-cancel-btn").hidden = true; }
 }
@@ -622,9 +780,23 @@ function bindEvents() {
   $("back-btn").addEventListener("click", backToPortalView);
   $("character-config-btn").addEventListener("click", openCharacterConfigModal); $("modal-close-btn").addEventListener("click", () => $("config-modal").classList.remove("active")); $("modal-cancel-btn").addEventListener("click", () => $("config-modal").classList.remove("active")); $("modal-save-btn").addEventListener("click", saveCharacterConfig);
   $("config-char-avatar-file").addEventListener("change", (event) => handleAvatarFileChange(event, "config-char-avatar-preview"));
+  $("worldbook-import-btn").addEventListener("click", () => $("worldbook-import-file").click());
+  $("worldbook-import-file").addEventListener("change", handleWorldbookImport);
+  $("worldbook-remove-btn").addEventListener("click", removeWorldbook);
   $("single-card-export-btn").addEventListener("click", exportSingleCharacterCard); $("single-card-import-btn").addEventListener("click", () => $("single-card-import-file").click()); $("single-card-import-file").addEventListener("change", handleSingleCardImport);
   $("system-export-btn").addEventListener("click", triggerSystemExport); $("system-import-btn").addEventListener("click", () => $("system-import-file").click()); $("system-import-file").addEventListener("change", handleSystemImport);
   $("clear-history-btn").addEventListener("click", clearCharacterHistory); $("chat-send-btn").addEventListener("click", sendChitChatMessage); $("chat-cancel-btn").addEventListener("click", cancelChatRequest);
+  $("memory-manager-btn").addEventListener("click", openCompanionMemoryManager);
+  $("memory-close-btn").addEventListener("click", () => $("memory-modal").classList.remove("active"));
+  $("memory-done-btn").addEventListener("click", () => $("memory-modal").classList.remove("active"));
+  $("memory-clear-btn").addEventListener("click", clearCompanionMemories);
+  $("memory-confirm-stage-btn").addEventListener("click", () => {
+    const character = activeCharacter(); if (!character?.contextState?.proposedRelationshipStage) return;
+    character.contextState.confirmedRelationshipStage = character.contextState.proposedRelationshipStage;
+    character.contextState.proposedRelationshipStage = "";
+    character.contextState.updatedAt = new Date().toISOString();
+    save(); openCompanionMemoryManager();
+  });
   $("time-travel-btn").addEventListener("click", openTimeTravelModal); $("time-travel-close-btn").addEventListener("click", () => $("time-travel-modal").classList.remove("active"));
   $("time-checkpoint-select").addEventListener("change", syncCheckpointDescription); $("create-time-branch-btn").addEventListener("click", createTimeBranch); $("return-real-timeline-btn").addEventListener("click", returnToRealTimeline);
   $("time-fork-source").addEventListener("change", syncForkTurnLimit); $("fork-time-branch-btn").addEventListener("click", forkSelectedBranch); $("compare-time-branches-btn").addEventListener("click", compareSelectedBranches);
@@ -640,6 +812,14 @@ function bindEvents() {
 
 document.addEventListener("DOMContentLoaded", async () => {
   bindEvents();
+  try {
+    const databaseState = await loadDatabaseState();
+    if (databaseState) state = normalizeState(databaseState);
+    else await queueDatabaseStateSave(state);
+  } catch (error) {
+    console.warn("SQLite 初始化失败，暂时使用兼容存储", error);
+  }
+  await Promise.all(state.characters.map((character) => migrateCardMemories(character).catch(() => {})));
   await compactStoredAvatars();
   $("user-global-name-input").value = state.globals.userName;
   setAvatar($("user-global-avatar-preview"), state.globals.userAvatar);

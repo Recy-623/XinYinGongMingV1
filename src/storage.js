@@ -1,4 +1,4 @@
-import { BACKUP_VERSION, CARD_VERSION, createDefaultState, defaultAvatar, LEGACY_STORAGE_KEYS, MAX_SYSTEM_PROMPT_LENGTH, STORAGE_KEY } from "./constants.js";
+import { BACKUP_VERSION, CARD_VERSION, createDefaultState, defaultAvatar, EXPERIENCE_MODE, LEGACY_STORAGE_KEYS, MAX_SYSTEM_PROMPT_LENGTH, STORAGE_KEY } from "./constants.js";
 import { normalizeRelationshipPreset } from "./relationship-presets.js";
 import { normalizeTimeline } from "./time-travel.js";
 
@@ -66,11 +66,40 @@ function normalizeRelationshipEvidence(value) {
   };
 }
 
+export function normalizeWorldbook(value) {
+  if (!value || typeof value !== "object" || value.version !== "xinyin-worldbook-v1") return null;
+  const id = text(value.id, 120); const title = text(value.title, 200);
+  if (!id || !title) return null;
+  const entries = Array.isArray(value.entries) ? value.entries.slice(0, 500).flatMap((entry) => {
+    const entryId = text(entry?.id, 120); const entryTitle = text(entry?.title, 200); const content = text(entry?.content, 4000);
+    if (!entryId || !entryTitle || !content) return [];
+    return [{
+      id: entryId, title: entryTitle, content,
+      keywords: stringList(entry.keywords, 30, 80),
+      aliases: stringList(entry.aliases, 30, 80),
+      activation: entry.activation === "always" ? "always" : "relevant",
+      importance: Math.max(0, Math.min(1, Number(entry.importance) || 0.5)),
+      sourceTier: text(entry.sourceTier, 80) || "creator_defined",
+      sourceRefs: stringList(entry.sourceRefs, 10, 1000),
+      canonNotes: text(entry.canonNotes, 1000),
+    }];
+  }) : [];
+  if (!entries.length) return null;
+  return {
+    version: "xinyin-worldbook-v1", id, title,
+    description: text(value.description, 2000),
+    precedence: stringList(value.precedence, 20, 500),
+    characterIds: stringList(value.characterIds, 30, 120),
+    entries,
+  };
+}
+
 export function normalizeCharacter(value) {
   const name = text(value?.name, 80);
   const systemPrompt = normalizeSystemPrompt(value?.systemPrompt);
   if (!name || !systemPrompt) return null;
   const character = {
+    experienceMode: EXPERIENCE_MODE,
     id: text(value.id, 100) || `char_${crypto.randomUUID()}`,
     name,
     avatar: isSafeAvatar(value.avatar) ? value.avatar : defaultAvatar,
@@ -91,6 +120,18 @@ export function normalizeCharacter(value) {
       sharedJokes: stringList(value.relationship?.sharedJokes),
     },
     memories: normalizeMemories(value.memories),
+    worldbook: normalizeWorldbook(value.worldbook),
+    worldbookRef: value.worldbookRef && typeof value.worldbookRef === "object" ? {
+      id: text(value.worldbookRef.id, 120), title: text(value.worldbookRef.title, 200),
+      version: text(value.worldbookRef.version, 50),
+    } : null,
+    contextState: {
+      sceneSummary: text(value.contextState?.sceneSummary, 4000),
+      lastMemoryIndex: Math.max(0, Number(value.contextState?.lastMemoryIndex) || 0),
+      proposedRelationshipStage: text(value.contextState?.proposedRelationshipStage, 300),
+      confirmedRelationshipStage: text(value.contextState?.confirmedRelationshipStage, 300),
+      updatedAt: text(value.contextState?.updatedAt, 100),
+    },
     sourceMetadata: value.sourceMetadata && typeof value.sourceMetadata === "object" ? {
       platform: text(value.sourceMetadata.platform, 50), fileName: text(value.sourceMetadata.fileName, 260),
       totalMessages: Number(value.sourceMetadata.totalMessages) || 0,
@@ -113,7 +154,7 @@ export function normalizeState(raw) {
   const selectedProvider = globals.selectedProvider === "openai" ? "openai" : "ollama";
   const activeCharacterId = text(raw.activeCharacterId, 100);
   return {
-    version: 5,
+    version: 6,
     globals: {
       userName: text(globals.userName, 80) || fallback.globals.userName,
       userAvatar: isSafeAvatar(globals.userAvatar) ? globals.userAvatar : fallback.globals.userAvatar,
@@ -152,17 +193,27 @@ export function serializeBackup(state) {
 }
 
 export function readBackup(value) {
-  if (!value || ![BACKUP_VERSION, "xinyin-backup-v4"].includes(value.version)) throw new Error("不是受支持的完整备份文件");
+  if (!value || ![BACKUP_VERSION, "xinyin-backup-v5", "xinyin-backup-v4"].includes(value.version)) throw new Error("不是受支持的完整备份文件");
   return normalizeState(value.state);
 }
 
 export function serializeCard(character) {
   const normalized = normalizeCharacter(character);
   if (!normalized) throw new Error("角色数据不完整");
-  return JSON.stringify({ version: CARD_VERSION, ...normalized, history: [], timeline: { ...normalized.timeline, branches: [], activeBranchId: "" } }, null, 2);
+  const { worldbook, ...portable } = normalized;
+  return JSON.stringify({
+    version: CARD_VERSION, experienceMode: EXPERIENCE_MODE, ...portable,
+    worldbookRef: worldbook
+      ? { id: worldbook.id, title: worldbook.title, version: worldbook.version }
+      : normalized.worldbookRef,
+    history: [], timeline: { ...normalized.timeline, branches: [], activeBranchId: "" },
+  }, null, 2);
 }
 
 export function readCard(value) {
-  if (!value || ![CARD_VERSION, "xinyin-card-v4", "xinyin-card-v3"].includes(value.version)) throw new Error("不是受支持的角色卡文件");
+  if (!value || ![CARD_VERSION, "xinyin-card-v5", "xinyin-card-v4", "xinyin-card-v3"].includes(value.version)) throw new Error("不是受支持的角色卡文件");
+  if (value.version === CARD_VERSION && value.experienceMode && value.experienceMode !== EXPERIENCE_MODE) {
+    throw new Error("这张角色卡属于短期语C模式，不能直接导入长期陪伴版本。请先导出 companion 模式角色卡。");
+  }
   return normalizeCharacter({ ...value, history: [], timeline: value.timeline ? { ...value.timeline, branches: [], activeBranchId: "" } : null });
 }

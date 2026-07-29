@@ -27,7 +27,7 @@ test("home character deletion and expanded prompt editor are present", () => {
   assert.match(main, /function deleteActiveCharacter\(\)/);
 });
 
-test("V5.2 branding and branch management actions are wired", () => {
-  assert.match(html, /心印共鸣 V5\.2/);
+test("V6 companion branding and branch management actions are wired", () => {
+  assert.match(html, /心印共鸣 V6/);
   for (const handler of ["forkSelectedBranch", "compareSelectedBranches", "renameBranch", "serializeBranch"]) assert.match(main, new RegExp(handler));
 });

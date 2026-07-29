@@ -218,15 +218,16 @@ test("single-card export keeps checkpoints but strips canonical and branch histo
   const branch = createBranch(character.timeline, "cp_early", "free", "隐私分支");
   branch.history.push({ role: "user", content: "不应导出" }); character.history.push({ role: "user", content: "也不应导出" });
   const exported = JSON.parse(serializeCard(character));
-  assert.equal(exported.version, "xinyin-card-v5");
+  assert.equal(exported.version, "xinyin-card-v6");
+  assert.equal(exported.experienceMode, "companion");
   assert.deepEqual(exported.history, []);
   assert.deepEqual(exported.timeline.branches, []);
   assert.equal(exported.timeline.checkpoints.length, 2);
 });
 
-test("V4 full backup is accepted and migrated to state version 5", () => {
+test("V4 full backup is accepted and migrated to state version 6", () => {
   const state = readBackup({ version: "xinyin-backup-v4", state: { version: 4, globals: {}, characters: [] } });
-  assert.equal(state.version, 5);
+  assert.equal(state.version, 6);
 });
 
 test("snapshot prefix filtering structurally excludes messages after the cutoff", () => {

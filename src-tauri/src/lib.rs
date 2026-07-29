@@ -1,3 +1,4 @@
+use rusqlite::{params, Connection};
 use serde_json::Value;
 use std::{
     env, fs,
@@ -8,6 +9,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use tauri::{AppHandle, Manager};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -15,6 +17,141 @@ use std::os::windows::process::CommandExt;
 const MAX_SESSION_NAME_LEN: usize = 200;
 const MAX_OUTPUT_BYTES: usize = 12 * 1024 * 1024;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+fn database(app: &AppHandle) -> Result<Connection, String> {
+    let directory = app.path().app_data_dir().map_err(|error| error.to_string())?;
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    let connection = Connection::open(directory.join("xinyingongming-companion.sqlite3"))
+        .map_err(|error| error.to_string())?;
+    connection.execute_batch(
+        "PRAGMA journal_mode=WAL;
+         CREATE TABLE IF NOT EXISTS app_state (
+           id INTEGER PRIMARY KEY CHECK(id=1),
+           state_json TEXT NOT NULL,
+           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+         );
+         CREATE TABLE IF NOT EXISTS memory_items (
+           id TEXT PRIMARY KEY,
+           character_id TEXT NOT NULL,
+           payload_json TEXT NOT NULL,
+           status TEXT NOT NULL DEFAULT 'active',
+           mention_policy TEXT NOT NULL DEFAULT 'relevant',
+           importance REAL NOT NULL DEFAULT 0.5,
+           last_used_at TEXT NOT NULL DEFAULT '',
+           use_count INTEGER NOT NULL DEFAULT 0,
+           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+         );
+         CREATE INDEX IF NOT EXISTS idx_companion_memory_character
+           ON memory_items(character_id, status, importance DESC);"
+    ).map_err(|error| error.to_string())?;
+    Ok(connection)
+}
+
+#[tauri::command]
+fn db_load_state(app: AppHandle) -> Result<Option<String>, String> {
+    match database(&app)?.query_row("SELECT state_json FROM app_state WHERE id=1", [], |row| row.get(0)) {
+        Ok(value) => Ok(Some(value)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+#[tauri::command]
+fn db_save_state(app: AppHandle, state_json: String) -> Result<(), String> {
+    serde_json::from_str::<Value>(&state_json).map_err(|error| error.to_string())?;
+    database(&app)?.execute(
+        "INSERT INTO app_state(id,state_json,updated_at) VALUES(1,?1,CURRENT_TIMESTAMP)
+         ON CONFLICT(id) DO UPDATE SET state_json=excluded.state_json, updated_at=CURRENT_TIMESTAMP",
+        params![state_json],
+    ).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn db_upsert_memories(app: AppHandle, items: Vec<Value>) -> Result<(), String> {
+    let mut connection = database(&app)?;
+    let transaction = connection.transaction().map_err(|error| error.to_string())?;
+    for item in items {
+        let id = item.get("id").and_then(Value::as_str).unwrap_or("").trim();
+        let character_id = item.get("characterId").and_then(Value::as_str).unwrap_or("").trim();
+        if id.is_empty() || character_id.is_empty() { continue; }
+        let status = item.get("status").and_then(Value::as_str).unwrap_or("active");
+        let mention_policy = item.get("mentionPolicy").and_then(Value::as_str).unwrap_or("relevant");
+        let importance = item.get("importance").and_then(Value::as_f64).unwrap_or(0.5);
+        let payload = serde_json::to_string(&item).map_err(|error| error.to_string())?;
+        transaction.execute(
+            "INSERT INTO memory_items(id,character_id,payload_json,status,mention_policy,importance)
+             VALUES(?1,?2,?3,?4,?5,?6)
+             ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json,
+               status=excluded.status, mention_policy=excluded.mention_policy,
+               importance=excluded.importance, updated_at=CURRENT_TIMESTAMP",
+            params![id, character_id, payload, status, mention_policy, importance],
+        ).map_err(|error| error.to_string())?;
+    }
+    transaction.commit().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn db_list_memories(app: AppHandle, character_id: String, limit: u16) -> Result<Vec<Value>, String> {
+    let connection = database(&app)?;
+    let mut statement = connection.prepare(
+        "SELECT payload_json,last_used_at,use_count FROM memory_items
+         WHERE character_id=?1 ORDER BY importance DESC, updated_at DESC LIMIT ?2"
+    ).map_err(|error| error.to_string())?;
+    let rows = statement.query_map(params![character_id, limit.min(1000)], |row| {
+        let payload: String = row.get(0)?;
+        let last_used_at: String = row.get(1)?;
+        let use_count: i64 = row.get(2)?;
+        let mut value: Value = serde_json::from_str(&payload).unwrap_or(Value::Null);
+        if let Some(object) = value.as_object_mut() {
+            object.insert("lastUsedAt".into(), Value::String(last_used_at));
+            object.insert("useCount".into(), Value::Number(use_count.into()));
+        }
+        Ok(value)
+    }).map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn db_mark_memories_used(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+    let mut connection = database(&app)?;
+    let transaction = connection.transaction().map_err(|error| error.to_string())?;
+    for id in ids {
+        transaction.execute(
+            "UPDATE memory_items SET last_used_at=CURRENT_TIMESTAMP,use_count=use_count+1 WHERE id=?1",
+            params![id],
+        ).map_err(|error| error.to_string())?;
+    }
+    transaction.commit().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn db_update_memory_lifecycle(app: AppHandle, id: String, status: String, mention_policy: String) -> Result<(), String> {
+    database(&app)?.execute(
+        "UPDATE memory_items SET status=?2,mention_policy=?3,updated_at=CURRENT_TIMESTAMP WHERE id=?1",
+        params![id, status, mention_policy],
+    ).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn db_delete_memory(app: AppHandle, id: String) -> Result<(), String> {
+    database(&app)?.execute("DELETE FROM memory_items WHERE id=?1", params![id])
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn db_clear_memories(app: AppHandle, character_id: String) -> Result<(), String> {
+    database(&app)?.execute("DELETE FROM memory_items WHERE character_id=?1", params![character_id])
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn db_delete_character_data(app: AppHandle, character_id: String) -> Result<(), String> {
+    db_clear_memories(app, character_id)
+}
 
 fn safe_executable(path: &Path) -> Option<PathBuf> {
     let canonical = fs::canonicalize(path).ok()?;
@@ -237,7 +374,16 @@ pub fn run() {
             detect_wx_cli,
             detect_qq_exporter,
             wx_sessions,
-            wx_history
+            wx_history,
+            db_load_state,
+            db_save_state,
+            db_upsert_memories,
+            db_list_memories,
+            db_mark_memories_used,
+            db_update_memory_lifecycle,
+            db_delete_memory,
+            db_clear_memories,
+            db_delete_character_data
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

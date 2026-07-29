@@ -30,3 +30,7 @@
 .branch-compare-result:empty { display:none; }
 @media (max-width:900px) { .header-actions { flex-wrap:wrap; justify-content:flex-end; } .branch-list-item { align-items:flex-start; flex-direction:column; } }
 @media (max-width:760px) { .branch-compare-grid { grid-template-columns:1fr; } }
+.memory-summary-panel,.memory-item { margin-bottom:.75rem; padding:.8rem; border:1px solid var(--border); border-radius:8px; background:#ffffff08; }
+.memory-item { display:flex; justify-content:space-between; gap:1rem; align-items:flex-start; }
+.memory-item small { display:block; margin-top:.35rem; color:var(--muted); }
+.memory-list { display:flex; flex-direction:column; gap:.5rem; }
