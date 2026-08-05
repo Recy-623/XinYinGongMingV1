@@ -3,10 +3,23 @@ import { characterFootprint, removeCharacterFromState } from "./character-manage
 import { parseChatFile, selectRepresentativeMessages } from "./chat-import.js";
 import { distillRelationship } from "./distillation.js";
 import { addOption, clear, downloadJson, element, readFileAsText, setAvatar } from "./dom.js";
-import { chatWithCloud, chatWithOllama, listCloudModels, listOllamaModels, normalizeBaseUrl, testCloud } from "./providers.js";
+import { chatWithCloudDetailed, chatWithOllamaDetailed, listCloudModels, listOllamaModels, normalizeBaseUrl, testCloud } from "./providers.js";
 import { isCustomRelationshipPreset, normalizeRelationshipPreset, relationshipPresetForPrompt, relationshipPresetHint } from "./relationship-presets.js";
-import { loadState, readBackup, readCard, saveState, serializeBackup, serializeCard } from "./storage.js";
+import { loadState, normalizeState, normalizeWorldbook, readBackup, readCard, saveState, serializeBackup, serializeCard } from "./storage.js";
 import { activeBranch, activeHistory, BRANCH_MODES, branchSystemPrompt, checkpointForBranch, compareBranches, createBranch, displayTime, forkBranchAtTurn, normalizeTimeline, recordBranchTurn, removeBranch, renameBranch, serializeBranch, timelineFromDistillation } from "./time-travel.js";
+import {
+  clearMemories, clearTokenDebug, deleteCharacterData, deleteMemory, listMemories, listTokenDebug,
+  loadDatabaseState, markMemoriesUsed, queueDatabaseStateSave, recordTokenDebug, updateMemoryLifecycle, upsertMemories,
+} from "./data/database.js";
+import {
+  normalizeMemory, parseMemoryExtraction, rankRelevantMemories, shouldExtractMemory,
+} from "./memory/companion-memory.js";
+import { worldbookContext } from "./worldbook/retriever.js";
+import { normalizeReplyTargetChars, replyLengthPlan } from "./context/reply-length.js";
+import { buildFeedbackRewriteInstruction, feedbackAuditMessages, feedbackAuditResult, feedbackContextHistory } from "./feedback/rewrite.js";
+import { buildTokenDebugEntry, summarizeTokenDebug, tokenPurposeLabel } from "./debug/token-monitor.js";
+import { evaluateNarrativeBoundary, GLOBAL_NARRATIVE_BOUNDARY, narrativeBoundaryCorrection } from "./context/narrative-boundary.js";
+import { replyAuditCorrection, replyAuditMessages, replyAuditResult } from "./quality/reply-audit.js";
 
 let state = loadState();
 let isEditMode = false;
@@ -14,12 +27,74 @@ let sessionApiKey = ""; // Intentionally memory-only: never written to disk or b
 let activeRequest = null;
 let importSession = { parsed: null, result: null, controller: null };
 let wxCliDetected = false;
+let feedbackTargetIndex = -1;
+const isAndroidRuntime = /Android/i.test(navigator.userAgent);
 
 const $ = (id) => document.getElementById(id);
-const save = () => saveState(state);
+const save = () => {
+  saveState(state);
+  queueDatabaseStateSave(state).catch((error) => console.warn("SQLite 保存失败，已保留兼容存储", error));
+};
 const activeCharacter = () => state.characters.find((character) => character.id === state.activeCharacterId);
 const activeConversationHistory = (character = activeCharacter()) => activeHistory(character);
 const safeFileName = (value) => value.replace(/[\\/:*?"<>|]/g, "_").slice(0, 50);
+
+function renderReplyLengthSetting() {
+  const value = normalizeReplyTargetChars(state.globals.replyTargetChars);
+  state.globals.replyTargetChars = value;
+  $("reply-length-slider").value = String(value);
+  $("reply-length-value").textContent = `${value} 字`;
+  $("reply-length-range").textContent = `自然目标约 ${Math.round(value * 0.9)}–${Math.round(value * 1.2)} 字；接近 ${value} 字时开始收束。`;
+}
+
+async function trackedModelRequest({ messages, purpose, groupId, signal, model: modelOverride = "", cloudOverrides = {}, ollamaOverrides = {} }) {
+  const character = activeCharacter();
+  const provider = state.globals.selectedProvider;
+  const model = modelOverride || state.globals.selectedModel;
+  const started = performance.now();
+  try {
+    const stableUser = `xinyin_${String(character?.id || "local").replace(/[^a-zA-Z0-9_-]/g, "_")}`.slice(0, 512);
+    const cloudOptions = /deepseek/i.test(state.globals.cloudApiUrl || "") ? { user_id: stableUser, ...cloudOverrides } : cloudOverrides;
+    const result = provider === "ollama"
+      ? await chatWithOllamaDetailed(model, messages, signal, ollamaOverrides)
+      : await chatWithCloudDetailed(state.globals.cloudApiUrl, sessionApiKey, model, messages, signal, cloudOptions);
+    const entry = await buildTokenDebugEntry({ character, provider, model, messages, purpose, groupId, metadata: result.metadata, durationMs: performance.now() - started });
+    recordTokenDebug(entry).catch((error) => console.warn("Token 调试记录写入失败", error));
+    return result;
+  } catch (error) {
+    const entry = await buildTokenDebugEntry({ character, provider, model, messages, purpose, groupId, durationMs: performance.now() - started, status: "error", errorMessage: error.message });
+    recordTokenDebug(entry).catch(() => {});
+    throw error;
+  }
+}
+
+function auditModelName() {
+  const selected = String(state.globals.selectedModel || "");
+  return state.globals.selectedProvider === "openai" && /deepseek/i.test(state.globals.cloudApiUrl || "") && selected === "deepseek-v4-pro"
+    ? "deepseek-v4-flash" : selected;
+}
+
+async function askAuditModel(messages, signal, purpose, groupId) {
+  const model = auditModelName();
+  const cloudOverrides = { temperature: 0, max_tokens: 400, response_format: { type: "json_object" } };
+  if (/deepseek/i.test(state.globals.cloudApiUrl || "")) cloudOverrides.thinking = { type: "disabled" };
+  const result = await trackedModelRequest({ messages, purpose, groupId, signal, model, cloudOverrides, ollamaOverrides: { temperature: 0, num_predict: 400 } });
+  return result.content;
+}
+
+async function generateRoleReply(messages, signal, purpose, groupId, length, extraCloud = {}) {
+  const isDeepSeek = state.globals.selectedProvider === "openai" && /deepseek/i.test(state.globals.cloudApiUrl || "");
+  const maxTokens = isDeepSeek ? length.thinkingMaxOutputTokens : length.maxOutputTokens;
+  const cloudOverrides = { max_tokens: maxTokens, ...extraCloud };
+  if (isDeepSeek) { cloudOverrides.thinking = { type: "enabled" }; cloudOverrides.reasoning_effort = "high"; }
+  return trackedModelRequest({ messages, purpose, groupId, signal, cloudOverrides, ollamaOverrides: { num_predict: maxTokens } });
+}
+
+async function enforceNarrativeBoundary(generation, messages, character, signal, groupId, length) {
+  const boundary = evaluateNarrativeBoundary(generation.content, character.name);
+  if (!boundary.issues.some((issue) => issue.hard)) return generation;
+  return generateRoleReply([...messages, { role: "system", content: narrativeBoundaryCorrection(character.name, generation.content, boundary) }], signal, "narrative_rewrite", groupId, length);
+}
 
 function renderCharacterSelectors() {
   const grid = $("character-selector-grid");
@@ -57,6 +132,7 @@ function deleteActiveCharacter() {
     : "";
   if (!confirm(`确定删除角色“${character.name}”吗？${detail}\n删除后无法恢复，除非你已经导出备份。`)) return;
   removeCharacterFromState(state, character.id);
+  deleteCharacterData(character.id).catch((error) => console.warn("角色记忆清理失败", error));
   save();
   renderCharacterSelectors();
 }
@@ -76,7 +152,7 @@ function syncChatSidebarList() {
   create.type = "button"; create.addEventListener("click", openCreateCharacterModal); list.append(create);
 }
 
-function appendChatBubble(role, content) {
+function appendChatBubble(role, content, historyIndex = -1) {
   const character = activeCharacter();
   const row = element("div", `msg-row ${role}`);
   const avatar = element("img", "chat-bubble-avatar");
@@ -84,6 +160,12 @@ function appendChatBubble(role, content) {
   const contentZone = element("div", "chat-bubble-content-zone");
   contentZone.append(element("span", "chat-bubble-name", role === "user" ? state.globals.userName : character?.name || "角色"));
   contentZone.append(element("div", "bubble", content));
+  if (role === "ai" && historyIndex >= 0) {
+    const rewrite = element("button", "feedback-rewrite-action", "评价并重写");
+    rewrite.type = "button";
+    rewrite.addEventListener("click", () => openFeedbackModal(historyIndex));
+    contentZone.append(rewrite);
+  }
   row.append(avatar, contentZone);
   $("chat-box").append(row); $("chat-box").scrollTop = $("chat-box").scrollHeight;
   return row;
@@ -105,7 +187,7 @@ function loadCharacterChatDialogue() {
       const checkpoint = checkpointForBranch(character, branch);
       appendChatBubble("ai", `时间停在 ${displayTime(checkpoint?.cutoffTime || "未知时刻")}。这是一条不会改写现实的模拟分支。`);
     } else appendChatBubble("ai", "静静地看着你，等待你的第一句话。");
-  } else history.forEach((message) => appendChatBubble(message.role === "user" ? "user" : "ai", message.content));
+  } else history.forEach((message, index) => appendChatBubble(message.role === "user" ? "user" : "ai", message.content, index));
 }
 
 function setModelOptions(models, placeholder) {
@@ -127,6 +209,24 @@ function toggleApiProviderFields() {
   state.globals.selectedProvider = provider;
   $("cloud-api-panel").classList.toggle("hidden", provider !== "openai");
   setModelOptions([], "请刷新模型列表"); save();
+}
+
+function applyAndroidRuntimeDefaults() {
+  if (!isAndroidRuntime) return;
+  document.documentElement.classList.add("android-runtime");
+  const ollamaOption = $("api-provider-select").querySelector('option[value="ollama"]');
+  if (ollamaOption) {
+    ollamaOption.disabled = true;
+    ollamaOption.textContent = "本地 Ollama（手机版不可用）";
+  }
+  if (state.globals.selectedProvider === "ollama") {
+    state.globals.selectedProvider = "openai";
+    state.globals.selectedModel = "";
+    save();
+  }
+  document.querySelectorAll(".connector-panel").forEach((panel) => panel.classList.add("desktop-only-connector"));
+  const note = element("p", "privacy-note mobile-import-note", "Android 版支持直接选择微信 / QQ 导出的 TXT、HTML、MHT 或 JSON 文件；需要调用 Windows 本机程序的连接器仅在电脑版可用。");
+  document.querySelector("#import-file-step .file-drop")?.before(note);
 }
 
 async function refreshModels() {
@@ -190,6 +290,7 @@ function backToPortalView() {
 function openCreateCharacterModal() {
   isEditMode = false; $("config-char-name").value = ""; $("config-char-prompt").value = "";
   setAvatar($("config-char-avatar-preview"), defaultAvatar); $("config-char-avatar-file").value = "";
+  $("worldbook-status").textContent = "未关联世界观";
   $("config-modal").classList.add("active");
 }
 
@@ -197,6 +298,7 @@ function openCharacterConfigModal() {
   const character = activeCharacter(); if (!character) return;
   isEditMode = true; $("config-char-name").value = character.name; $("config-char-prompt").value = character.systemPrompt;
   setAvatar($("config-char-avatar-preview"), character.avatar); $("config-char-avatar-file").value = "";
+  $("worldbook-status").textContent = character.worldbook ? `已关联：${character.worldbook.title}（${character.worldbook.entries.length} 条）` : "未关联世界观";
   $("config-modal").classList.add("active");
 }
 
@@ -207,11 +309,32 @@ function saveCharacterConfig() {
   if (isEditMode) Object.assign(activeCharacter(), { name, systemPrompt, avatar });
   else {
     const id = `char_${crypto.randomUUID()}`;
-    const character = { id, name, avatar, systemPrompt, history: [], profile: {}, relationship: {}, memories: [], sourceMetadata: null };
+    const character = { id, name, avatar, systemPrompt, history: [], profile: {}, relationship: {}, memories: [], worldbook: null, sourceMetadata: null };
     character.timeline = normalizeTimeline(null, character); state.characters.push(character); state.activeCharacterId = id;
   }
   save(); $("config-modal").classList.remove("active"); renderCharacterSelectors();
   if ($("chitchat-view").classList.contains("active")) { syncChatSidebarList(); loadCharacterChatDialogue(); }
+}
+
+async function handleWorldbookImport(event) {
+  try {
+    const character = activeCharacter();
+    if (!isEditMode || !character) throw new Error("请先保存新角色，再为它导入世界观。");
+    const value = JSON.parse(await readFileAsText(event.target.files?.[0]));
+    const worldbook = normalizeWorldbook(value);
+    if (!worldbook) throw new Error("不是有效的 xinyin-worldbook-v1 文件。");
+    character.worldbook = worldbook;
+    character.worldbookRef = { id: worldbook.id, title: worldbook.title, version: worldbook.version };
+    save();
+    $("worldbook-status").textContent = `已关联：${worldbook.title}（${worldbook.entries.length} 条）`;
+  } catch (error) { alert(error.message || "世界观导入失败"); }
+  finally { event.target.value = ""; }
+}
+
+function removeWorldbook() {
+  const character = activeCharacter(); if (!isEditMode || !character) return;
+  character.worldbook = null; character.worldbookRef = null; save();
+  $("worldbook-status").textContent = "未关联世界观";
 }
 
 async function optimizeAvatarSource(source, maxSide = 256) {
@@ -577,13 +700,226 @@ function relationshipContext(character, userText) {
   if (!character?.relationship && !character?.profile) return "";
   const profile = character.profile || {}; const relationship = character.relationship || {};
   const relationshipEvidence = relationship.evidence || {};
-  const terms = [...new Set([...userText.matchAll(/[\p{L}\p{N}]{2,}/gu)].map((match) => match[0]))];
-  const ranked = (character.memories || []).map((memory) => {
-    const haystack = `${memory.title} ${memory.summary} ${memory.emotionalMeaning} ${(memory.keywords || []).join(" ")}`;
-    const score = terms.reduce((total, term) => total + (haystack.includes(term) ? 2 : 0), 0) + (memory.keywords || []).reduce((total, keyword) => total + (userText.includes(keyword) ? 3 : 0), 0);
-    return { memory, score };
-  }).filter((item) => item.score > 0).sort((a, b) => b.score - a.score).slice(0, 5).map(({ memory }) => `- [${memory.time || "时间未知"}] ${memory.title}：${memory.summary}${memory.emotionalMeaning ? `（意义：${memory.emotionalMeaning}）` : ""}`);
-  return `\n\n【关系档案】\n人格：${profile.personality || "未记录"}\n表达习惯：${(profile.speechStyle || []).join("；")}\n聊天证实的关系：${relationship.summary || "未记录"}\n证据阶段：${relationshipEvidence.observedStage || "未记录"}\n证据摘要：${relationshipEvidence.summary || "未记录"}\n相处预设（用户偏好，非现实事实）：\n${relationshipPresetForPrompt(relationship.preset)}\n相处模式：${(relationship.interactionPatterns || []).join("；")}\n共同称呼与梗：${[...(relationship.nicknames || []), ...(relationship.sharedJokes || [])].join("；")}\n边界：${(profile.boundaries || []).join("；")}\n不确定信息不得当作事实：${(profile.uncertainties || []).join("；")}\n${ranked.length ? `与当前话题相关的共同记忆：\n${ranked.join("\n")}` : "当前没有检索到明确相关的共同记忆。"}`;
+  void userText;
+  return `\n\n【关系档案】\n人格：${profile.personality || "未记录"}\n表达习惯：${(profile.speechStyle || []).join("；")}\n聊天证实的关系：${relationship.summary || "未记录"}\n证据阶段：${relationshipEvidence.observedStage || "未记录"}\n证据摘要：${relationshipEvidence.summary || "未记录"}\n相处预设（用户偏好，非现实事实）：\n${relationshipPresetForPrompt(relationship.preset)}\n相处模式：${(relationship.interactionPatterns || []).join("；")}\n共同称呼与梗：${[...(relationship.nicknames || []), ...(relationship.sharedJokes || [])].join("；")}\n边界：${(profile.boundaries || []).join("；")}\n不确定信息不得当作事实：${(profile.uncertainties || []).join("；")}\n共同记忆由本机数据库按当前话题另行检索。`;
+}
+
+async function companionMemoryContext(character, userText) {
+  try {
+    const selected = rankRelevantMemories(await listMemories(character.id, 300), userText);
+    markMemoriesUsed(selected.map((item) => item.id)).catch(() => {});
+    if (!selected.length && !character.contextState?.sceneSummary) return "";
+    const memories = selected.map((item) => `- ${item.summary}`).join("\n");
+    const relationshipStage = character.contextState?.confirmedRelationshipStage
+      ? `用户已确认的关系阶段：${character.contextState.confirmedRelationshipStage}`
+      : character.contextState?.proposedRelationshipStage
+        ? `尚未确认的关系线索：${character.contextState.proposedRelationshipStage}。不得当作既成事实。`
+        : "";
+    return `\n\n【按当前话题检索到的长期上下文】\n${relationshipStage}\n${character.contextState?.sceneSummary ? `此前阶段摘要：${character.contextState.sceneSummary}` : ""}\n${memories ? `相关记忆：\n${memories}` : ""}\n只在自然相关时使用；不要无缘无故主动复述，也不要把未确认推断写成事实。`;
+  } catch (error) {
+    console.warn("长期记忆检索失败", error);
+    return "";
+  }
+}
+
+async function migrateCardMemories(character) {
+  const items = (character.memories || []).flatMap((memory) => {
+    if (!memory?.title || !memory?.summary) return [];
+    return [normalizeMemory({
+      characterId: character.id,
+      memoryType: "relationship",
+      summary: `${memory.title}：${memory.summary}${memory.emotionalMeaning ? `（意义：${memory.emotionalMeaning}）` : ""}`,
+      keywords: [memory.title, ...(memory.keywords || [])],
+      importance: 0.8,
+      confidence: memory.confidence || 0.8,
+      confirmed: true,
+      scope: "identity",
+      mentionPolicy: "relevant",
+      subjectKey: `card:${memory.title}`,
+    }, character.id)];
+  });
+  await upsertMemories(items);
+}
+
+async function maintainCompanionMemory(character, userText, signal) {
+  character.contextState ||= { sceneSummary: "", lastMemoryIndex: 0 };
+  const trigger = shouldExtractMemory({
+    userText,
+    history: character.history,
+    lastIndex: character.contextState.lastMemoryIndex,
+  });
+  if (!trigger.shouldExtract) return;
+  const segment = character.history.slice(character.contextState.lastMemoryIndex);
+  if (segment.length < 2) return;
+  const transcript = segment.slice(-24).map((item) => `${item.role === "user" ? "使用者" : "角色"}：${item.content}`).join("\n");
+  const prompt = `请整理一段长期陪伴对话，只返回严格 JSON：
+{"summary":"当前阶段摘要","relationshipProposal":"只有证据充分时才写关系阶段，否则留空","memories":[{"memoryType":"episodic|relationship|preference|open_loop","summary":"可在未来复用的简洁事实","keywords":[""],"importance":0.0,"confidence":0.0,"scope":"long_term|scene","mentionPolicy":"relevant|passive","subjectKey":""}]}
+规则：只保留使用者明确表达或双方确实发生的事项；不得把角色的猜测、用户未说出的心理、生理反应或模型自己编写的情节当成使用者事实；纠正信息应取代旧结论；普通流水账不保存；最多 6 条记忆。
+触发原因：${trigger.reasons.join("、")}
+<对话>
+${transcript}
+</对话>`;
+  const request = await trackedModelRequest({
+    messages: [{ role: "user", content: prompt }], purpose: "memory_extraction",
+    groupId: crypto.randomUUID(), signal, model: auditModelName(),
+    cloudOverrides: { temperature: 0, max_tokens: 900, response_format: { type: "json_object" }, ...(/deepseek/i.test(state.globals.cloudApiUrl || "") ? { thinking: { type: "disabled" } } : {}) },
+    ollamaOverrides: { temperature: 0, num_predict: 900 },
+  });
+  const raw = request.content;
+  const extraction = parseMemoryExtraction(raw, character.id);
+  if (extraction.summary) character.contextState.sceneSummary = extraction.summary;
+  if (extraction.relationshipProposal) character.contextState.proposedRelationshipStage = extraction.relationshipProposal;
+  character.contextState.lastMemoryIndex = character.history.length;
+  character.contextState.updatedAt = new Date().toISOString();
+  await upsertMemories(extraction.memories);
+  save();
+}
+
+async function openCompanionMemoryManager() {
+  const character = activeCharacter(); if (!character) return;
+  $("memory-scene-summary").textContent = character.contextState?.sceneSummary || "尚未生成阶段摘要。";
+  const proposed = character.contextState?.proposedRelationshipStage;
+  const confirmed = character.contextState?.confirmedRelationshipStage;
+  $("memory-relationship-state").textContent = confirmed
+    ? `已确认：${confirmed}`
+    : proposed ? `待确认提案：${proposed}` : "尚无关系阶段变化。";
+  $("memory-confirm-stage-btn").hidden = !proposed;
+  const list = $("memory-list"); clear(list);
+  $("memory-modal").classList.add("active");
+  try {
+    const memories = await listMemories(character.id, 300);
+    if (!memories.length) list.append(element("p", "privacy-note", "尚无长期记忆。系统只在明确约定、纠正、场景结束或上下文达到阈值时整理。"));
+    for (const memory of memories) {
+      const item = element("article", "memory-item");
+      const body = element("div");
+      body.append(element("strong", "", memory.summary), element("small", "", `${memory.memoryType} · ${memory.status || "active"} · 使用 ${memory.useCount || 0} 次`));
+      const controls = element("div", "header-actions");
+      const status = element("select");
+      [["active", "有效"], ["resolved", "已解决"], ["expired", "已过期"], ["superseded", "已取代"]]
+        .forEach(([value, label]) => addOption(status, value, label));
+      status.value = memory.status || "active";
+      const policy = element("select");
+      [["relevant", "相关时可提及"], ["passive", "仅被问到时"], ["never", "永不提及"]]
+        .forEach(([value, label]) => addOption(policy, value, label));
+      policy.value = memory.mentionPolicy || "relevant";
+      const apply = element("button", "btn btn-secondary", "应用");
+      apply.type = "button";
+      apply.addEventListener("click", async () => {
+        await updateMemoryLifecycle(memory.id, status.value, policy.value);
+        await openCompanionMemoryManager();
+      });
+      const remove = element("button", "btn btn-secondary", "删除");
+      remove.type = "button";
+      remove.addEventListener("click", async () => {
+        if (!confirm("删除这条长期记忆吗？")) return;
+        await deleteMemory(memory.id); await openCompanionMemoryManager();
+      });
+      controls.append(status, policy, apply, remove);
+      item.append(body, controls); list.append(item);
+    }
+  } catch (error) {
+    list.append(element("p", "privacy-note", `读取记忆失败：${error.message || "未知错误"}`));
+  }
+}
+
+async function clearCompanionMemories() {
+  const character = activeCharacter(); if (!character) return;
+  if (!confirm("清空当前角色的全部长期记忆和阶段摘要吗？聊天记录与角色卡不会删除。")) return;
+  await clearMemories(character.id);
+  character.contextState = {
+    sceneSummary: "", lastMemoryIndex: character.history.length,
+    proposedRelationshipStage: "", confirmedRelationshipStage: "", updatedAt: new Date().toISOString(),
+  };
+  save(); await openCompanionMemoryManager();
+}
+
+function openFeedbackModal(historyIndex) {
+  const history = activeConversationHistory();
+  if (activeRequest || historyIndex < 0 || history[historyIndex]?.role !== "assistant") return;
+  feedbackTargetIndex = historyIndex;
+  $("feedback-text").value = "";
+  const laterCount = history.length - historyIndex - 1;
+  $("feedback-warning").hidden = laterCount <= 0;
+  $("feedback-warning").textContent = laterCount > 0
+    ? `选中回复之后还有 ${laterCount} 条消息。重写会删除这些后续消息，避免时间线同时保留两个互相冲突的版本。`
+    : "";
+  $("feedback-modal").classList.add("active");
+  $("feedback-text").focus();
+}
+
+function closeFeedbackModal() {
+  feedbackTargetIndex = -1;
+  $("feedback-modal").classList.remove("active");
+}
+
+async function feedbackSystemPrompt(character, branch, history) {
+  if (branch) return `${branchSystemPrompt(character, branch, state.globals.userName)}\n\n${GLOBAL_NARRATIVE_BOUNDARY}`;
+  const lastUserText = [...history].reverse().find((item) => item.role === "user")?.content || "";
+  const retrievedContext = await companionMemoryContext(character, lastUserText);
+  return `${character.systemPrompt}\n\n${GLOBAL_NARRATIVE_BOUNDARY}\n当前交流的用户名字是：${state.globals.userName}。${relationshipContext(character, lastUserText)}${retrievedContext}${worldbookContext(character.worldbook, `${lastUserText} ${character.contextState?.sceneSummary || ""}`)}`;
+}
+
+async function regenerateFromFeedback() {
+  const character = activeCharacter(); const history = activeConversationHistory(character);
+  const index = feedbackTargetIndex; const feedback = $("feedback-text").value.trim();
+  if (!character || index < 0 || history[index]?.role !== "assistant" || !feedback || activeRequest) return;
+  if (history.length > index + 1 && !confirm("重写这条回复会删除其后的消息，继续吗？")) return;
+  const button = $("feedback-regenerate-btn"); const controller = new AbortController(); activeRequest = controller;
+  button.disabled = true; button.textContent = "正在比较并重写…";
+  const original = history[index].content; const context = feedbackContextHistory(history, index); const branch = activeBranch(character);
+  const length = replyLengthPlan(state.globals.replyTargetChars); const groupId = crypto.randomUUID();
+  try {
+    const basePrompt = await feedbackSystemPrompt(character, branch, context);
+    const makeMessages = (extra = "") => [{ role: "system", content: `${basePrompt}${buildFeedbackRewriteInstruction(original, feedback)}\n\n【本轮回复长度偏好】\n${length.instruction}${extra}` }, ...context.slice(branch ? -30 : -20)];
+    let sourceMessages = makeMessages();
+    let generated = await generateRoleReply(sourceMessages, controller.signal, "feedback_generation", groupId, length);
+    generated = await enforceNarrativeBoundary(generated, sourceMessages, character, controller.signal, groupId, length);
+    let result = feedbackAuditResult(await askAuditModel(feedbackAuditMessages(original, feedback, generated.content), controller.signal, "feedback_audit", groupId));
+    if (!result.passed) {
+      const correction = `\n\n【首次纠错验收未通过】\n${result.reason || "仍未充分修正"}\n遗漏：${result.missing.join("；") || "请逐项落实使用者意见"}\n再次重写，不得解释验收。`;
+      sourceMessages = makeMessages(correction);
+      generated = await generateRoleReply(sourceMessages, controller.signal, "feedback_generation", groupId, length);
+      generated = await enforceNarrativeBoundary(generated, sourceMessages, character, controller.signal, groupId, length);
+      result = feedbackAuditResult(await askAuditModel(feedbackAuditMessages(original, feedback, generated.content), controller.signal, "feedback_audit", groupId));
+      if (!result.passed) throw new Error(`两次重写仍未解决意见：${result.reason || result.missing.join("；")}`);
+    }
+    history.splice(index, history.length - index, { role: "assistant", content: generated.content });
+    if (branch) branch.state.turnCount = history.filter((item) => item.role === "user").length;
+    save(); closeFeedbackModal(); loadCharacterChatDialogue();
+  } catch (error) {
+    if (error.name !== "AbortError") alert(`重写失败：${error.message || "未知错误"}`);
+  } finally { activeRequest = null; button.disabled = false; button.textContent = "比较并重新生成"; }
+}
+
+function tokenStat(value, label) {
+  const item = element("article", "token-debug-stat");
+  const display = typeof value === "number" ? value.toLocaleString() : String(value ?? "0");
+  item.append(element("strong", "", display), element("small", "", label));
+  return item;
+}
+
+async function openTokenDebug() {
+  const character = activeCharacter(); if (!character) return;
+  $("token-debug-modal").classList.add("active");
+  const entries = await listTokenDebug(character.id, 500); const summary = summarizeTokenDebug(entries);
+  const stats = $("token-debug-summary"); clear(stats);
+  stats.append(tokenStat(summary.requests, "模型请求"), tokenStat(summary.promptTokens, "输入 Token"), tokenStat(summary.cacheHitTokens, "缓存命中"), tokenStat(summary.cacheMissTokens, "缓存未命中"), tokenStat(`${Math.round(summary.cacheRate * 100)}%`, `总体命中率 · ${summary.cacheMeasuredRequests} 次有明细`));
+  const body = $("token-debug-table-body"); clear(body);
+  for (const item of entries) {
+    const row = element("tr");
+    const measured = item.cacheMetricsAvailable;
+    const total = Number(item.cacheHitTokens || 0) + Number(item.cacheMissTokens || 0);
+    const values = [new Date(item.createdAt).toLocaleString(), tokenPurposeLabel(item.purpose), item.model || item.requestedModel,
+      Number(item.promptTokens || 0).toLocaleString(), measured ? Number(item.cacheHitTokens || 0).toLocaleString() : "不可用",
+      measured ? Number(item.cacheMissTokens || 0).toLocaleString() : "不可用", measured && total ? `${Math.round(Number(item.cacheHitTokens || 0) / total * 100)}%` : "不可用",
+      Number(item.completionTokens || 0).toLocaleString(), `${(Number(item.durationMs || 0) / 1000).toFixed(1)}s`, item.stablePrefixHash || "—", item.status || "—"];
+    values.forEach((value) => row.append(element("td", "", value))); body.append(row);
+  }
+}
+
+async function clearCurrentTokenDebug() {
+  const character = activeCharacter(); if (!character || !confirm("清空当前角色的 Token 调试记录吗？角色聊天和长期记忆不会受影响。")) return;
+  await clearTokenDebug(character.id); await openTokenDebug();
 }
 
 async function sendChitChatMessage() {
@@ -593,15 +929,33 @@ async function sendChitChatMessage() {
   input.value = ""; history.push({ role: "user", content }); if (branch) recordBranchTurn(branch); save(); appendChatBubble("user", content);
   const pendingRow = appendChatBubble("ai", "正在思考…"); const pendingBubble = pendingRow.querySelector(".bubble");
   const controller = new AbortController(); activeRequest = controller; $("chat-send-btn").disabled = true; $("chat-cancel-btn").hidden = false;
-  const systemPrompt = branch
-    ? branchSystemPrompt(character, branch, state.globals.userName)
-    : `${character.systemPrompt}\n当前交流的用户名字是：${state.globals.userName}。${relationshipContext(character, content)}`;
+  const retrievedContext = branch ? "" : await companionMemoryContext(character, content);
+  const baseSystemPrompt = branch
+    ? `${branchSystemPrompt(character, branch, state.globals.userName)}\n\n${GLOBAL_NARRATIVE_BOUNDARY}`
+    : `${character.systemPrompt}\n\n${GLOBAL_NARRATIVE_BOUNDARY}\n当前交流的用户名字是：${state.globals.userName}。${relationshipContext(character, content)}${retrievedContext}${worldbookContext(character.worldbook, `${content} ${character.contextState?.sceneSummary || ""}`)}`;
+  const length = replyLengthPlan(state.globals.replyTargetChars);
+  const systemPrompt = `${baseSystemPrompt}\n\n【本轮回复长度偏好】\n${length.instruction}`;
   const messages = [{ role: "system", content: systemPrompt }, ...history.slice(branch ? -30 : -20)];
   try {
-    const reply = state.globals.selectedProvider === "ollama"
-      ? await chatWithOllama(state.globals.selectedModel, messages, controller.signal)
-      : await chatWithCloud(state.globals.cloudApiUrl, sessionApiKey, state.globals.selectedModel, messages, controller.signal);
+    const groupId = crypto.randomUUID();
+    let response = await generateRoleReply(messages, controller.signal, "main_generation", groupId, length);
+    response = await enforceNarrativeBoundary(response, messages, character, controller.signal, groupId, length);
+    let reply = response.content;
+    let audit = replyAuditResult(await askAuditModel(replyAuditMessages({ characterName: character.name, personaPrompt: baseSystemPrompt, userInput: content, recentHistory: history.slice(0, -1), draft: reply, lengthPlan: length }), controller.signal, "reply_audit", groupId));
+    if (!audit.passed) {
+      pendingBubble.textContent = "发现理解或叙事边界偏差，正在自动重写…";
+      const rewriteMessages = [...messages, { role: "system", content: replyAuditCorrection(audit, reply, length) }];
+      response = await generateRoleReply(rewriteMessages, controller.signal, "main_rewrite", groupId, length);
+      response = await enforceNarrativeBoundary(response, rewriteMessages, character, controller.signal, groupId, length);
+      reply = response.content;
+      audit = replyAuditResult(await askAuditModel(replyAuditMessages({ characterName: character.name, personaPrompt: baseSystemPrompt, userInput: content, recentHistory: history.slice(0, -1), draft: reply, lengthPlan: length }), controller.signal, "reply_audit", groupId));
+      if (!audit.passed) throw new Error(`两次生成仍未通过回复检查：${audit.reason || audit.violations.map((item) => item.correction).join("；")}`);
+    }
     pendingBubble.textContent = reply; history.push({ role: "assistant", content: reply }); if (branch) recordBranchTurn(branch); save();
+    const rewrite = element("button", "feedback-rewrite-action", "评价并重写"); rewrite.type = "button";
+    rewrite.addEventListener("click", () => openFeedbackModal(history.length - 1)); pendingRow.querySelector(".chat-bubble-content-zone").append(rewrite);
+    if (!branch) maintainCompanionMemory(character, content, controller.signal)
+      .catch((error) => console.warn("长期记忆整理失败，将在后续触发时重试", error));
   } catch (error) { pendingBubble.textContent = error.name === "AbortError" ? "已取消生成。" : `请求失败：${error.message || "未知错误"}`; }
   finally { activeRequest = null; $("chat-send-btn").disabled = false; $("chat-cancel-btn").hidden = true; }
 }
@@ -613,6 +967,10 @@ function bindEvents() {
   $("api-provider-select").addEventListener("change", toggleApiProviderFields);
   $("test-cloud-btn").addEventListener("click", testCloudConnection); $("refresh-models-btn").addEventListener("click", refreshModels);
   $("delete-character-btn").addEventListener("click", deleteActiveCharacter);
+  $("reply-length-slider").addEventListener("input", (event) => {
+    state.globals.replyTargetChars = normalizeReplyTargetChars(event.target.value); renderReplyLengthSetting();
+  });
+  $("reply-length-slider").addEventListener("change", () => save());
   // Use a capture listener for this primary navigation action. WebView2 can
   // occasionally retain a focused button while its direct listener is stale
   // after a long-running modal or model refresh.
@@ -622,9 +980,26 @@ function bindEvents() {
   $("back-btn").addEventListener("click", backToPortalView);
   $("character-config-btn").addEventListener("click", openCharacterConfigModal); $("modal-close-btn").addEventListener("click", () => $("config-modal").classList.remove("active")); $("modal-cancel-btn").addEventListener("click", () => $("config-modal").classList.remove("active")); $("modal-save-btn").addEventListener("click", saveCharacterConfig);
   $("config-char-avatar-file").addEventListener("change", (event) => handleAvatarFileChange(event, "config-char-avatar-preview"));
+  $("worldbook-import-btn").addEventListener("click", () => $("worldbook-import-file").click());
+  $("worldbook-import-file").addEventListener("change", handleWorldbookImport);
+  $("worldbook-remove-btn").addEventListener("click", removeWorldbook);
   $("single-card-export-btn").addEventListener("click", exportSingleCharacterCard); $("single-card-import-btn").addEventListener("click", () => $("single-card-import-file").click()); $("single-card-import-file").addEventListener("change", handleSingleCardImport);
   $("system-export-btn").addEventListener("click", triggerSystemExport); $("system-import-btn").addEventListener("click", () => $("system-import-file").click()); $("system-import-file").addEventListener("change", handleSystemImport);
   $("clear-history-btn").addEventListener("click", clearCharacterHistory); $("chat-send-btn").addEventListener("click", sendChitChatMessage); $("chat-cancel-btn").addEventListener("click", cancelChatRequest);
+  $("feedback-close-btn").addEventListener("click", closeFeedbackModal); $("feedback-cancel-btn").addEventListener("click", closeFeedbackModal); $("feedback-regenerate-btn").addEventListener("click", regenerateFromFeedback);
+  $("token-debug-btn").addEventListener("click", openTokenDebug); $("token-debug-close-btn").addEventListener("click", () => $("token-debug-modal").classList.remove("active"));
+  $("token-debug-done-btn").addEventListener("click", () => $("token-debug-modal").classList.remove("active")); $("token-debug-refresh-btn").addEventListener("click", openTokenDebug); $("token-debug-clear-btn").addEventListener("click", clearCurrentTokenDebug);
+  $("memory-manager-btn").addEventListener("click", openCompanionMemoryManager);
+  $("memory-close-btn").addEventListener("click", () => $("memory-modal").classList.remove("active"));
+  $("memory-done-btn").addEventListener("click", () => $("memory-modal").classList.remove("active"));
+  $("memory-clear-btn").addEventListener("click", clearCompanionMemories);
+  $("memory-confirm-stage-btn").addEventListener("click", () => {
+    const character = activeCharacter(); if (!character?.contextState?.proposedRelationshipStage) return;
+    character.contextState.confirmedRelationshipStage = character.contextState.proposedRelationshipStage;
+    character.contextState.proposedRelationshipStage = "";
+    character.contextState.updatedAt = new Date().toISOString();
+    save(); openCompanionMemoryManager();
+  });
   $("time-travel-btn").addEventListener("click", openTimeTravelModal); $("time-travel-close-btn").addEventListener("click", () => $("time-travel-modal").classList.remove("active"));
   $("time-checkpoint-select").addEventListener("change", syncCheckpointDescription); $("create-time-branch-btn").addEventListener("click", createTimeBranch); $("return-real-timeline-btn").addEventListener("click", returnToRealTimeline);
   $("time-fork-source").addEventListener("change", syncForkTurnLimit); $("fork-time-branch-btn").addEventListener("click", forkSelectedBranch); $("compare-time-branches-btn").addEventListener("click", compareSelectedBranches);
@@ -640,11 +1015,20 @@ function bindEvents() {
 
 document.addEventListener("DOMContentLoaded", async () => {
   bindEvents();
+  try {
+    const databaseState = await loadDatabaseState();
+    if (databaseState) state = normalizeState(databaseState);
+    else await queueDatabaseStateSave(state);
+  } catch (error) {
+    console.warn("SQLite 初始化失败，暂时使用兼容存储", error);
+  }
+  applyAndroidRuntimeDefaults();
+  await Promise.all(state.characters.map((character) => migrateCardMemories(character).catch(() => {})));
   await compactStoredAvatars();
   $("user-global-name-input").value = state.globals.userName;
   setAvatar($("user-global-avatar-preview"), state.globals.userAvatar);
   $("api-provider-select").value = state.globals.selectedProvider;
   $("api-url-input").value = state.globals.cloudApiUrl;
   $("cloud-api-panel").classList.toggle("hidden", state.globals.selectedProvider !== "openai");
-  renderCharacterSelectors(); refreshModels();
+  renderReplyLengthSetting(); renderCharacterSelectors(); refreshModels();
 });

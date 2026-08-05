@@ -22,13 +22,32 @@ export function addOption(select, value, label = value) {
   select.append(option);
 }
 
-export function downloadJson(filename, content) {
-  const url = URL.createObjectURL(new Blob([content], { type: "application/json" }));
+export async function downloadJson(filename, content) {
+  const invoke = window.__TAURI__?.core?.invoke;
+  if (invoke) {
+    try {
+      return await invoke("export_json_file", { filename, content });
+    } catch (error) {
+      alert(`导出失败：${error?.message || error || "无法写入所选位置"}`);
+      return false;
+    }
+  }
+  const file = new File([content], filename, { type: "application/json" });
+  if (navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: filename });
+      return true;
+    } catch (error) {
+      if (error?.name === "AbortError") return false;
+    }
+  }
+  const url = URL.createObjectURL(file);
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = filename;
   anchor.click();
   setTimeout(() => URL.revokeObjectURL(url), 0);
+  return true;
 }
 
 export function readFileAsText(file, maxBytes = 5 * 1024 * 1024) {

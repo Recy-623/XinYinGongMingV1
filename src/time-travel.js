@@ -185,7 +185,7 @@ export function createBranch(timeline, checkpointId, mode, name) {
   if (timeline.branches.length >= MAX_BRANCHES) throw new Error(`每个角色最多保留 ${MAX_BRANCHES} 条分支`);
   const checkpoint = timeline.checkpoints.find((item) => item.id === checkpointId);
   if (!checkpoint) throw new Error("所选时间锚点不存在");
-  if (!checkpoint.historical) throw new Error("这个旧版迁移锚点不具备可靠的历史切片，不能创建过去分支。请重新导入聊天记录进行 V5 蒸馏。");
+  if (!checkpoint.historical) throw new Error("这个旧版迁移锚点不具备可靠的历史切片，不能创建过去分支。请重新导入聊天记录进行 V6 蒸馏。");
   const branch = normalizeBranch({
     id: `branch_${crypto.randomUUID()}`,
     name: text(name, 120) || `${checkpoint.title}的新分支`,
