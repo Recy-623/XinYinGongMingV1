@@ -1,4 +1,4 @@
-import { BACKUP_VERSION, CARD_VERSION, createDefaultState, defaultAvatar, EXPERIENCE_MODE, LEGACY_STORAGE_KEYS, MAX_SYSTEM_PROMPT_LENGTH, STORAGE_KEY } from "./constants.js";
+import { BACKUP_VERSION, CARD_VERSION, createDefaultState, DEFAULT_REPLY_TARGET_CHARS, defaultAvatar, EXPERIENCE_MODE, LEGACY_STORAGE_KEYS, MAX_REPLY_TARGET_CHARS, MAX_SYSTEM_PROMPT_LENGTH, MIN_REPLY_TARGET_CHARS, STORAGE_KEY } from "./constants.js";
 import { normalizeRelationshipPreset } from "./relationship-presets.js";
 import { normalizeTimeline } from "./time-travel.js";
 
@@ -161,6 +161,7 @@ export function normalizeState(raw) {
       selectedProvider,
       cloudApiUrl: text(globals.cloudApiUrl, 500),
       selectedModel: text(globals.selectedModel, 200),
+      replyTargetChars: Math.max(MIN_REPLY_TARGET_CHARS, Math.min(MAX_REPLY_TARGET_CHARS, Number(globals.replyTargetChars) || DEFAULT_REPLY_TARGET_CHARS)),
     },
     characters,
     activeCharacterId: characters.some((character) => character.id === activeCharacterId)

@@ -42,7 +42,7 @@ export async function testCloud(baseUrl, apiKey, model) {
   if (!response.ok) throw new Error(`连接失败，状态码: ${response.status}`);
 }
 
-export async function chatWithOllama(model, messages, signal, overrides = {}) {
+export async function chatWithOllamaDetailed(model, messages, signal, overrides = {}) {
   const options = {
     // Ollama otherwise uses the model's 32K context. For a 32B model that KV
     // cache alone can consume about 8GB and force weights back onto the CPU.
@@ -59,16 +59,34 @@ export async function chatWithOllama(model, messages, signal, overrides = {}) {
   });
   if (!response.ok) throw new Error(`Ollama 返回 ${response.status}`);
   const data = await response.json();
-  return data?.message?.content || "服务没有返回有效内容。";
+  return { content: data?.message?.content || "服务没有返回有效内容。", metadata: {
+    requestedModel:model, returnedModel:data?.model||model, finishReason:data?.done_reason||(data?.done?"stop":"unknown"),
+    promptTokens:Number(data?.prompt_eval_count)||0, completionTokens:Number(data?.eval_count)||0,
+    totalTokens:(Number(data?.prompt_eval_count)||0)+(Number(data?.eval_count)||0), reasoningTokens:0,
+    cacheMetricsAvailable:false,
+  } };
 }
 
-export async function chatWithCloud(baseUrl, apiKey, model, messages, signal) {
+export async function chatWithOllama(model, messages, signal, overrides = {}) {
+  return (await chatWithOllamaDetailed(model, messages, signal, overrides)).content;
+}
+
+export async function chatWithCloudDetailed(baseUrl, apiKey, model, messages, signal, overrides = {}) {
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST", signal,
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ model, messages, stream: false }),
+    body: JSON.stringify({ model, messages, stream: false, ...overrides }),
   });
   if (!response.ok) throw new Error(`云端服务返回 ${response.status}`);
   const data = await response.json();
-  return data?.choices?.[0]?.message?.content || "服务没有返回有效内容。";
+  const choice=data?.choices?.[0]||{}; const usage=data?.usage||{};
+  const available=Object.hasOwn(usage,"prompt_cache_hit_tokens")||Object.hasOwn(usage,"prompt_cache_miss_tokens")||Number.isFinite(Number(usage?.prompt_tokens_details?.cached_tokens));
+  const promptTokens=Number(usage?.prompt_tokens)||0;
+  const cacheHitTokens=Number(usage?.prompt_cache_hit_tokens??usage?.prompt_tokens_details?.cached_tokens)||0;
+  const cacheMissTokens=Number(usage?.prompt_cache_miss_tokens)||(available?Math.max(0,promptTokens-cacheHitTokens):0);
+  return { content:choice?.message?.content||"服务没有返回有效内容。", metadata:{ responseId:data?.id||"", requestedModel:model, returnedModel:data?.model||model, finishReason:choice?.finish_reason||"unknown", promptTokens, cacheHitTokens, cacheMissTokens, completionTokens:Number(usage?.completion_tokens)||0, totalTokens:Number(usage?.total_tokens)||0, reasoningTokens:Number(usage?.completion_tokens_details?.reasoning_tokens)||0, cacheMetricsAvailable:available } };
+}
+
+export async function chatWithCloud(baseUrl, apiKey, model, messages, signal, overrides = {}) {
+  return (await chatWithCloudDetailed(baseUrl, apiKey, model, messages, signal, overrides)).content;
 }

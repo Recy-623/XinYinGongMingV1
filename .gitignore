@@ -12,6 +12,13 @@ dist
 dist-ssr
 *.local
 
+# Local builds and Codex workspace metadata
+*.apk
+__pycache__/
+*.pyc
+.agents/
+.codex/
+
 # XinYin private user data (never commit)
 # Keep personal cards, full backups, extracted chats, and database snapshots
 # outside source control. Generic schema/docs under skill/ remain trackable.

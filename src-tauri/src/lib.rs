@@ -2,7 +2,7 @@ use rusqlite::{params, Connection};
 use serde_json::Value;
 use std::{
     env, fs,
-    io::Read,
+    io::{Read, Write},
     net::{SocketAddr, TcpStream},
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -10,6 +10,8 @@ use std::{
     time::{Duration, Instant},
 };
 use tauri::{AppHandle, Manager};
+use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_fs::{FsExt, OpenOptions};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -42,7 +44,14 @@ fn database(app: &AppHandle) -> Result<Connection, String> {
            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
          );
          CREATE INDEX IF NOT EXISTS idx_companion_memory_character
-           ON memory_items(character_id, status, importance DESC);"
+           ON memory_items(character_id, status, importance DESC);
+         CREATE TABLE IF NOT EXISTS token_request_debug (
+           id INTEGER PRIMARY KEY AUTOINCREMENT,
+           character_id TEXT NOT NULL DEFAULT '',
+           payload_json TEXT NOT NULL,
+           created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+         );
+         CREATE INDEX IF NOT EXISTS idx_companion_token_character ON token_request_debug(character_id,id DESC);"
     ).map_err(|error| error.to_string())?;
     Ok(connection)
 }
@@ -150,7 +159,38 @@ fn db_clear_memories(app: AppHandle, character_id: String) -> Result<(), String>
 
 #[tauri::command]
 fn db_delete_character_data(app: AppHandle, character_id: String) -> Result<(), String> {
-    db_clear_memories(app, character_id)
+    let connection = database(&app)?;
+    connection.execute("DELETE FROM memory_items WHERE character_id=?1", params![character_id]).map_err(|error| error.to_string())?;
+    connection.execute("DELETE FROM token_request_debug WHERE character_id=?1", params![character_id]).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn db_record_token_debug(app: AppHandle, entry: Value) -> Result<(), String> {
+    let character_id = entry.get("characterId").and_then(Value::as_str).unwrap_or("");
+    let payload = serde_json::to_string(&entry).map_err(|error| error.to_string())?;
+    database(&app)?.execute("INSERT INTO token_request_debug(character_id,payload_json) VALUES(?1,?2)", params![character_id,payload]).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn db_list_token_debug(app: AppHandle, character_id: Option<String>, limit: u16) -> Result<Vec<Value>, String> {
+    let connection=database(&app)?;
+    let sql=if character_id.as_deref().unwrap_or("").is_empty(){"SELECT payload_json FROM token_request_debug ORDER BY id DESC LIMIT ?1"}else{"SELECT payload_json FROM token_request_debug WHERE character_id=?1 ORDER BY id DESC LIMIT ?2"};
+    let mut statement=connection.prepare(sql).map_err(|error| error.to_string())?;
+    let values=if let Some(id)=character_id.filter(|value| !value.is_empty()) {
+        statement.query_map(params![id,limit.min(1000)],|row| row.get::<_,String>(0)).map_err(|error| error.to_string())?.collect::<Result<Vec<_>,_>>().map_err(|error| error.to_string())?
+    } else {
+        statement.query_map(params![limit.min(1000)],|row| row.get::<_,String>(0)).map_err(|error| error.to_string())?.collect::<Result<Vec<_>,_>>().map_err(|error| error.to_string())?
+    };
+    Ok(values.into_iter().filter_map(|raw| serde_json::from_str(&raw).ok()).collect())
+}
+
+#[tauri::command]
+fn db_clear_token_debug(app: AppHandle, character_id: Option<String>) -> Result<(), String> {
+    let connection=database(&app)?;
+    if let Some(id)=character_id.filter(|value| !value.is_empty()){connection.execute("DELETE FROM token_request_debug WHERE character_id=?1",params![id])}else{connection.execute("DELETE FROM token_request_debug",[])}.map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 fn safe_executable(path: &Path) -> Option<PathBuf> {
@@ -367,9 +407,137 @@ fn wx_history(
     run_wx(&arguments, Duration::from_secs(60))
 }
 
+#[cfg(target_os = "android")]
+fn save_json_to_android_downloads(filename: &str, content: &str) -> Result<bool, String> {
+    use jni::{
+        objects::{JObject, JValue},
+        JavaVM,
+    };
+
+    let android = tao::platform::android::prelude::main_android_context()
+        .ok_or_else(|| "Android 活动尚未准备好，请稍后重试".to_string())?;
+    let vm = unsafe { JavaVM::from_raw(android.java_vm.cast()) }
+        .map_err(|error| format!("无法连接 Android 运行环境：{error}"))?;
+    let mut env = vm
+        .attach_current_thread()
+        .map_err(|error| format!("无法连接 Android 文件服务：{error}"))?;
+    let context = unsafe { JObject::from_raw(android.context_jobject.cast()) };
+    let resolver = env
+        .call_method(
+            &context,
+            "getContentResolver",
+            "()Landroid/content/ContentResolver;",
+            &[],
+        )
+        .and_then(|value| value.l())
+        .map_err(|error| format!("无法打开 Android 下载目录：{error}"))?;
+    let values = env
+        .new_object("android/content/ContentValues", "()V", &[])
+        .map_err(|error| format!("无法准备导出文件：{error}"))?;
+
+    for (key, value) in [
+        ("_display_name", filename),
+        ("mime_type", "application/json"),
+        ("relative_path", "Download/心印共鸣"),
+    ] {
+        let key = env.new_string(key).map_err(|error| error.to_string())?;
+        let value = env.new_string(value).map_err(|error| error.to_string())?;
+        env.call_method(
+            &values,
+            "put",
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            &[
+                JValue::Object(&JObject::from(key)),
+                JValue::Object(&JObject::from(value)),
+            ],
+        )
+        .map_err(|error| format!("无法设置导出文件信息：{error}"))?;
+    }
+
+    let uri_text = env
+        .new_string("content://media/external/downloads")
+        .map_err(|error| error.to_string())?;
+    let collection = env
+        .call_static_method(
+            "android/net/Uri",
+            "parse",
+            "(Ljava/lang/String;)Landroid/net/Uri;",
+            &[JValue::Object(&JObject::from(uri_text))],
+        )
+        .and_then(|value| value.l())
+        .map_err(|error| format!("无法定位 Android 下载目录：{error}"))?;
+    let output_uri = env
+        .call_method(
+            &resolver,
+            "insert",
+            "(Landroid/net/Uri;Landroid/content/ContentValues;)Landroid/net/Uri;",
+            &[JValue::Object(&collection), JValue::Object(&values)],
+        )
+        .and_then(|value| value.l())
+        .map_err(|error| format!("无法创建下载文件：{error}"))?;
+    if output_uri.is_null() {
+        return Err("Android 下载目录没有返回可写文件".into());
+    }
+
+    let stream = env
+        .call_method(
+            &resolver,
+            "openOutputStream",
+            "(Landroid/net/Uri;)Ljava/io/OutputStream;",
+            &[JValue::Object(&output_uri)],
+        )
+        .and_then(|value| value.l())
+        .map_err(|error| format!("无法写入下载文件：{error}"))?;
+    if stream.is_null() {
+        return Err("Android 下载目录没有返回输出流".into());
+    }
+    let bytes = env
+        .byte_array_from_slice(content.as_bytes())
+        .map_err(|error| format!("无法编码导出内容：{error}"))?;
+    let bytes = JObject::from(bytes);
+    env.call_method(&stream, "write", "([B)V", &[JValue::Object(&bytes)])
+        .map_err(|error| format!("写入下载文件失败：{error}"))?;
+    env.call_method(&stream, "flush", "()V", &[])
+        .map_err(|error| format!("刷新下载文件失败：{error}"))?;
+    env.call_method(&stream, "close", "()V", &[])
+        .map_err(|error| format!("关闭下载文件失败：{error}"))?;
+    Ok(true)
+}
+
+#[tauri::command]
+fn export_json_file(app: AppHandle, filename: String, content: String) -> Result<bool, String> {
+    if content.len() > 20 * 1024 * 1024 {
+        return Err("导出内容超过 20MB 限制".into());
+    }
+    let safe_name: String = filename
+        .chars()
+        .map(|character| if matches!(character, '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '_' } else { character })
+        .take(100)
+        .collect();
+    let safe_name = if safe_name.to_ascii_lowercase().ends_with(".json") { safe_name } else { format!("{safe_name}.json") };
+    #[cfg(target_os = "android")]
+    {
+        return save_json_to_android_downloads(&safe_name, &content);
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+    let Some(path) = app.dialog().file().add_filter("JSON", &["json"]).set_file_name(safe_name).blocking_save_file() else {
+        return Ok(false);
+    };
+    let mut options = OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    let mut file = app.fs().open(path, options).map_err(|error| error.to_string())?;
+    file.write_all(content.as_bytes()).map_err(|error| error.to_string())?;
+    file.flush().map_err(|error| error.to_string())?;
+    Ok(true)
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
             detect_wx_cli,
             detect_qq_exporter,
@@ -383,7 +551,11 @@ pub fn run() {
             db_update_memory_lifecycle,
             db_delete_memory,
             db_clear_memories,
-            db_delete_character_data
+            db_delete_character_data,
+            db_record_token_debug,
+            db_list_token_debug,
+            db_clear_token_debug,
+            export_json_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

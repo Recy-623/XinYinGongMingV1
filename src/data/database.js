@@ -53,3 +53,15 @@ export async function deleteCharacterData(characterId) {
   const call = invoke();
   if (call) await call("db_delete_character_data", { characterId });
 }
+
+export async function recordTokenDebug(entry) {
+  const call = invoke(); if (call) await call("db_record_token_debug", { entry });
+}
+
+export async function listTokenDebug(characterId, limit = 500) {
+  const call = invoke(); return call ? call("db_list_token_debug", { characterId: characterId || null, limit }) : [];
+}
+
+export async function clearTokenDebug(characterId) {
+  const call = invoke(); if (call) await call("db_clear_token_debug", { characterId: characterId || null });
+}
