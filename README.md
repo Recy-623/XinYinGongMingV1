@@ -26,9 +26,6 @@ Windows 安装版使用 Tauri 应用数据目录。主数据库文件名固定�
 xinyingongming-companion.sqlite3
 ```
 
-数据库与短期语 C 版本的 `xinyingongming-r18.sqlite3` 完全分离。
-两版还使用不同的应用标识，因此不会共享 WebView 本地配置。功能迁移只允许复制通用代码和空数据结构，不迁移短期语 C 的角色、世界观、聊天、记忆或日志。
-
 ## 角色卡与世界观
 
 - [心印共鸣人设卡规范](./心印共鸣人设卡规范.md)
