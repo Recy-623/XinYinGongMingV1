@@ -22,7 +22,7 @@ test("长期记忆只检索相关有效条目并遵守 never", () => {
     normalizeMemory({ summary: "不应再提及的旧信息", keywords: ["雨天"], mentionPolicy: "never", importance: 1 }, "char_test"),
     normalizeMemory({ summary: "完全无关的信息", keywords: ["烹饪"], importance: 0.2 }, "char_test"),
   ];
-  const selected = rankRelevantMemories(memories, "今天下雨了");
+  const selected = rankRelevantMemories(memories, "还记得雨天散步吗");
   assert.equal(selected.length, 1);
   assert.match(selected[0].summary, /雨天散步/);
 });

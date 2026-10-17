@@ -27,3 +27,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"
 tao = "0.35"
+
+[target.'cfg(windows)'.dependencies]
+btleplug = "0.11"
+tokio = { version = "1", features = ["time", "sync"] }

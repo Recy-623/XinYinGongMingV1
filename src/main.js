@@ -12,9 +12,10 @@ import {
   loadDatabaseState, markMemoriesUsed, queueDatabaseStateSave, recordTokenDebug, updateMemoryLifecycle, upsertMemories,
 } from "./data/database.js";
 import {
-  normalizeMemory, parseMemoryExtraction, rankRelevantMemories, shouldExtractMemory,
+  cardMemorySeeds, normalizeMemory, parseMemoryExtraction, rankRelevantMemories, shouldExtractMemory,
 } from "./memory/companion-memory.js";
-import { worldbookContext } from "./worldbook/retriever.js";
+import { worldbookContext, worldbookStatus } from "./worldbook/retriever.js";
+import { relationshipContext } from "./context/relationship.js";
 import { normalizeReplyTargetChars, replyLengthPlan } from "./context/reply-length.js";
 import { buildFeedbackRewriteInstruction, feedbackAuditMessages, feedbackAuditResult, feedbackContextHistory } from "./feedback/rewrite.js";
 import { buildTokenDebugEntry, summarizeTokenDebug, tokenPurposeLabel } from "./debug/token-monitor.js";
@@ -188,6 +189,17 @@ function loadCharacterChatDialogue() {
       appendChatBubble("ai", `时间停在 ${displayTime(checkpoint?.cutoffTime || "未知时刻")}。这是一条不会改写现实的模拟分支。`);
     } else appendChatBubble("ai", "静静地看着你，等待你的第一句话。");
   } else history.forEach((message, index) => appendChatBubble(message.role === "user" ? "user" : "ai", message.content, index));
+  resetCompactChatScrollPositions();
+}
+
+function resetCompactChatScrollPositions() {
+  if (!window.matchMedia?.("(max-width: 560px)").matches) return;
+  requestAnimationFrame(() => {
+    const actions = document.querySelector(".chat-header .header-actions");
+    const characters = document.querySelector(".chat-sidebar .sidebar-list");
+    if (actions) actions.scrollLeft = 0;
+    if (characters) characters.scrollLeft = 0;
+  });
 }
 
 function setModelOptions(models, placeholder) {
@@ -298,7 +310,7 @@ function openCharacterConfigModal() {
   const character = activeCharacter(); if (!character) return;
   isEditMode = true; $("config-char-name").value = character.name; $("config-char-prompt").value = character.systemPrompt;
   setAvatar($("config-char-avatar-preview"), character.avatar); $("config-char-avatar-file").value = "";
-  $("worldbook-status").textContent = character.worldbook ? `已关联：${character.worldbook.title}（${character.worldbook.entries.length} 条）` : "未关联世界观";
+  $("worldbook-status").textContent = worldbookStatus(character);
   $("config-modal").classList.add("active");
 }
 
@@ -568,6 +580,7 @@ function createDistilledRole() {
   const id = `char_${crypto.randomUUID()}`;
   const speechStyle = lines($("review-speech-style").value); const interactionPatterns = lines($("review-patterns").value);
   const relationshipEvidence = {
+    sourceType: "chat",
     observedStage: $("review-evidence-stage").value.trim(),
     summary: $("review-evidence-summary").value.trim(),
     confidence: Math.max(0, Math.min(1, Number($("review-evidence-confidence").value) || 0)),
@@ -696,20 +709,12 @@ function compareSelectedBranches() {
   } catch (error) { $("time-compare-result").textContent = error.message || "无法比较分支"; }
 }
 
-function relationshipContext(character, userText) {
-  if (!character?.relationship && !character?.profile) return "";
-  const profile = character.profile || {}; const relationship = character.relationship || {};
-  const relationshipEvidence = relationship.evidence || {};
-  void userText;
-  return `\n\n【关系档案】\n人格：${profile.personality || "未记录"}\n表达习惯：${(profile.speechStyle || []).join("；")}\n聊天证实的关系：${relationship.summary || "未记录"}\n证据阶段：${relationshipEvidence.observedStage || "未记录"}\n证据摘要：${relationshipEvidence.summary || "未记录"}\n相处预设（用户偏好，非现实事实）：\n${relationshipPresetForPrompt(relationship.preset)}\n相处模式：${(relationship.interactionPatterns || []).join("；")}\n共同称呼与梗：${[...(relationship.nicknames || []), ...(relationship.sharedJokes || [])].join("；")}\n边界：${(profile.boundaries || []).join("；")}\n不确定信息不得当作事实：${(profile.uncertainties || []).join("；")}\n共同记忆由本机数据库按当前话题另行检索。`;
-}
-
 async function companionMemoryContext(character, userText) {
   try {
     const selected = rankRelevantMemories(await listMemories(character.id, 300), userText);
     markMemoriesUsed(selected.map((item) => item.id)).catch(() => {});
     if (!selected.length && !character.contextState?.sceneSummary) return "";
-    const memories = selected.map((item) => `- ${item.summary}`).join("\n");
+    const memories = selected.map((item) => `- [${item.sourceType === "canon" ? "原作基础经历" : item.sourceType === "chat" ? "聊天记录" : item.sourceType === "user_defined" ? "用户设定" : "已存记忆，来源未分类"}] ${item.summary}`).join("\n");
     const relationshipStage = character.contextState?.confirmedRelationshipStage
       ? `用户已确认的关系阶段：${character.contextState.confirmedRelationshipStage}`
       : character.contextState?.proposedRelationshipStage
@@ -723,21 +728,7 @@ async function companionMemoryContext(character, userText) {
 }
 
 async function migrateCardMemories(character) {
-  const items = (character.memories || []).flatMap((memory) => {
-    if (!memory?.title || !memory?.summary) return [];
-    return [normalizeMemory({
-      characterId: character.id,
-      memoryType: "relationship",
-      summary: `${memory.title}：${memory.summary}${memory.emotionalMeaning ? `（意义：${memory.emotionalMeaning}）` : ""}`,
-      keywords: [memory.title, ...(memory.keywords || [])],
-      importance: 0.8,
-      confidence: memory.confidence || 0.8,
-      confirmed: true,
-      scope: "identity",
-      mentionPolicy: "relevant",
-      subjectKey: `card:${memory.title}`,
-    }, character.id)];
-  });
+  const items = cardMemorySeeds(character, await listMemories(character.id, 1000));
   await upsertMemories(items);
 }
 
