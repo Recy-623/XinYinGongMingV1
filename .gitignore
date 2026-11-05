@@ -7,8 +7,10 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
+node_modules/
+.tooling/
+dist/
+src-tauri/gen/android/.gradle/
 dist-ssr
 *.local
 
@@ -22,3 +24,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local release artifacts and credentials
+*.apk
+*.aab
+*.jks
+*.keystore
+.env
+.env.*

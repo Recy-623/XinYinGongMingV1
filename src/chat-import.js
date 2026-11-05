@@ -116,6 +116,55 @@ function parseLines(source) {
   return messages;
 }
 
+export function parseCsv(source) {
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let quoted = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === '"') {
+      if (quoted && source[index + 1] === '"') { cell += '"'; index += 1; }
+      else quoted = !quoted;
+    } else if (char === "," && !quoted) {
+      row.push(cell); cell = "";
+    } else if ((char === "\n" || char === "\r") && !quoted) {
+      if (char === "\r" && source[index + 1] === "\n") index += 1;
+      row.push(cell); cell = "";
+      if (row.some((value) => clean(value))) rows.push(row);
+      row = [];
+    } else {
+      cell += char;
+    }
+  }
+  row.push(cell);
+  if (row.some((value) => clean(value))) rows.push(row);
+  if (rows.length < 2) return [];
+
+  const aliases = {
+    sender: ["sender", "sendername", "name", "nickname", "from", "发言人", "发送者", "昵称", "姓名"],
+    content: ["content", "message", "msg", "text", "内容", "消息", "消息内容"],
+    time: ["time", "timestamp", "datetime", "date", "时间", "日期", "发送时间"],
+    self: ["isself", "is_sender", "self", "是否本人", "是否自己"],
+  };
+  const normalizedHeaders = rows[0].map((header) => clean(header).toLowerCase().replace(/[\s_-]/g, ""));
+  const column = (names) => normalizedHeaders.findIndex((header) => names.includes(header));
+  const senderColumn = column(aliases.sender);
+  const contentColumn = column(aliases.content);
+  const timeColumn = column(aliases.time);
+  const selfColumn = column(aliases.self);
+  if (senderColumn < 0 || contentColumn < 0) return [];
+
+  return rows.slice(1).flatMap((values) => {
+    const selfValue = selfColumn >= 0 ? clean(values[selfColumn]).toLowerCase() : "";
+    const isSelf = ["1", "true", "yes", "是", "本人", "自己"].includes(selfValue);
+    const sender = isSelf ? "我" : clean(values[senderColumn]);
+    const content = clean(values[contentColumn]);
+    const time = timeColumn >= 0 ? normalizeTime(values[timeColumn]) : "";
+    return validMessage(sender, content) ? [{ sender, content, time }] : [];
+  });
+}
+
 function detectPlatform(fileName, content) {
   const sample = `${fileName}\n${content.slice(0, 5000)}`;
   if (/QQ|腾讯QQ|消息分组|消息对象/i.test(sample)) return "QQ";
@@ -131,6 +180,7 @@ export async function parseChatFile(file) {
   if (/\.json$/i.test(file.name) || /^[\s\r\n]*[\[{]/.test(content)) {
     try { structuredRoot = JSON.parse(content); messages = parseStructured(structuredRoot); } catch { /* fall through to text parser */ }
   }
+  if (!messages.length && /\.csv$/i.test(file.name)) messages = parseCsv(content);
   if (!messages.length) {
     if (/\.(html?|mht|mhtml)$/i.test(file.name) || /<html|<body|<div/i.test(content.slice(0, 1000))) content = htmlToText(content);
     messages = parseLines(content);
@@ -147,7 +197,7 @@ export async function parseChatFile(file) {
   return { platform, fileName: file.name, messages, participants };
 }
 
-export function selectRepresentativeMessages(messages, selfName, otherName, maxMessages = 1600) {
+export function selectRepresentativeMessages(messages, selfName, otherName, maxMessages = 800) {
   const relevant = messages.filter((message) => message.sender === selfName || message.sender === otherName);
   if (relevant.length <= maxMessages) return relevant;
   const selected = [];

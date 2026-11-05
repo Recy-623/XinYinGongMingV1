@@ -1,4 +1,5 @@
-import { BACKUP_VERSION, CARD_VERSION, createDefaultState, defaultAvatar, LEGACY_STORAGE_KEY, STORAGE_KEY } from "./constants.js";
+import { load } from "@tauri-apps/plugin-store";
+import { BACKUP_VERSION, CARD_VERSION, createDefaultState, defaultAvatar, LEGACY_STORAGE_KEY, MAX_SYSTEM_PROMPT_LENGTH, STORAGE_KEY, V4_STORAGE_KEY } from "./constants.js";
 
 const MAX_CHARACTERS = 100;
 const MAX_HISTORY_PER_CHARACTER = 500;
@@ -42,7 +43,7 @@ function normalizeMemories(value) {
 
 export function normalizeCharacter(value) {
   const name = text(value?.name, 80);
-  const systemPrompt = text(value?.systemPrompt, 12_000);
+  const systemPrompt = text(value?.systemPrompt, MAX_SYSTEM_PROMPT_LENGTH);
   if (!name || !systemPrompt) return null;
   return {
     id: text(value.id, 100) || `char_${crypto.randomUUID()}`,
@@ -80,15 +81,15 @@ export function normalizeState(raw) {
   const characters = Array.isArray(raw.characters)
     ? raw.characters.slice(0, MAX_CHARACTERS).map(normalizeCharacter).filter(Boolean)
     : [];
-  const selectedProvider = globals.selectedProvider === "openai" ? "openai" : "ollama";
+  const apiMode = globals.apiMode === "compatible-chat" ? "compatible-chat" : "openai-responses";
   const activeCharacterId = text(raw.activeCharacterId, 100);
   return {
-    version: 4,
+    version: 4.9,
     globals: {
       userName: text(globals.userName, 80) || fallback.globals.userName,
       userAvatar: isSafeAvatar(globals.userAvatar) ? globals.userAvatar : fallback.globals.userAvatar,
-      selectedProvider,
-      cloudApiUrl: text(globals.cloudApiUrl, 500),
+      apiMode,
+      cloudApiUrl: text(globals.cloudApiUrl, 500) || fallback.globals.cloudApiUrl,
       selectedModel: text(globals.selectedModel, 200),
     },
     characters,
@@ -98,11 +99,13 @@ export function normalizeState(raw) {
   };
 }
 
-export function loadState() {
+let appStore = null;
+
+function loadLocalFallback() {
   // V3 stored cloud credentials in WebView localStorage. Remove that legacy
   // plaintext value as soon as V4 starts; credentials are session-only now.
   localStorage.removeItem("xinyingongming_secure_apikey");
-  for (const key of [STORAGE_KEY, LEGACY_STORAGE_KEY]) {
+  for (const key of [STORAGE_KEY, V4_STORAGE_KEY, LEGACY_STORAGE_KEY]) {
     try {
       const raw = localStorage.getItem(key);
       if (raw) return normalizeState(JSON.parse(raw));
@@ -113,8 +116,27 @@ export function loadState() {
   return createDefaultState();
 }
 
-export function saveState(state) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeState(state)));
+export async function loadState() {
+  try {
+    appStore = await load("xinyin-state.json", { autoSave: false, defaults: {} });
+    const stored = await appStore.get("state");
+    if (stored) return normalizeState(stored);
+    const migrated = loadLocalFallback();
+    await appStore.set("state", normalizeState(migrated));
+    await appStore.save();
+    return migrated;
+  } catch {
+    return loadLocalFallback();
+  }
+}
+
+export async function saveState(state) {
+  const normalized = normalizeState(state);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+  if (appStore) {
+    await appStore.set("state", normalized);
+    await appStore.save();
+  }
 }
 
 export function serializeBackup(state) {
@@ -122,7 +144,7 @@ export function serializeBackup(state) {
 }
 
 export function readBackup(value) {
-  if (!value || value.version !== BACKUP_VERSION) throw new Error("不是受支持的完整备份文件");
+  if (!value || ![BACKUP_VERSION, "xinyin-backup-v4"].includes(value.version)) throw new Error("不是受支持的完整备份文件");
   return normalizeState(value.state);
 }
 

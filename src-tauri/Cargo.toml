@@ -1,8 +1,8 @@
 [package]
-name = "xinyingongmingv1"
-version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+name = "xinyingongming_android"
+version = "4.9.2"
+description = "心印共鸣 V4.9 Android API-only client"
+authors = ["Recy-623"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -11,7 +11,7 @@ edition = "2021"
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
-name = "xinyingongmingv1_lib"
+name = "xinyingongming_android_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -19,4 +19,13 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+aes-gcm = "0.10"
+argon2 = "0.5"
+base64 = "0.22"
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tauri-plugin-store = "2"
+tokio = { version = "1", features = ["sync"] }
+zeroize = "1"

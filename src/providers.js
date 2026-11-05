@@ -1,74 +1,46 @@
-const OLLAMA_BASE = "http://localhost:11434";
+import { invoke } from "@tauri-apps/api/core";
 
 export function normalizeBaseUrl(value) {
-  const url = new URL(value.trim());
-  const localhost = ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
-  if (url.protocol !== "https:" && !(localhost && url.protocol === "http:")) {
-    throw new Error("云端 API 必须使用 HTTPS（本机服务可使用 HTTP）");
-  }
+  const url = new URL(String(value || "").trim());
+  if (url.protocol !== "https:") throw new Error("移动版只允许 HTTPS API 地址");
+  if (url.username || url.password || url.search || url.hash) throw new Error("API 地址不能包含账号、密码、查询参数或片段");
   return url.href.replace(/\/$/, "");
 }
 
-async function request(url, options = {}, timeoutMs = 30_000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-export async function listOllamaModels() {
-  const response = await request(`${OLLAMA_BASE}/api/tags`, {}, 5_000);
-  if (!response.ok) throw new Error(`Ollama 返回 ${response.status}`);
-  const data = await response.json();
-  return Array.isArray(data.models) ? data.models.map((model) => model.name).filter(Boolean) : [];
+function config(mode, baseUrl, apiKey, model) {
+  return {
+    mode,
+    baseUrl: normalizeBaseUrl(baseUrl),
+    apiKey: String(apiKey || "").trim(),
+    model: String(model || "").trim(),
+  };
 }
 
 export async function listCloudModels(baseUrl, apiKey) {
-  const response = await request(`${baseUrl}/models`, { headers: { Authorization: `Bearer ${apiKey}` } }, 10_000);
-  if (!response.ok) throw new Error(`模型列表返回 ${response.status}`);
-  const data = await response.json();
-  return Array.isArray(data.data) ? data.data.map((model) => model.id).filter(Boolean) : [];
+  return invoke("api_list_models", { baseUrl: normalizeBaseUrl(baseUrl), apiKey: String(apiKey || "").trim() });
 }
 
-export async function testCloud(baseUrl, apiKey, model) {
-  const response = await request(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ model, messages: [{ role: "user", content: "ping" }], max_tokens: 1 }),
-  });
-  if (!response.ok) throw new Error(`连接失败，状态码: ${response.status}`);
+export async function testCloud(mode, baseUrl, apiKey, model) {
+  return invoke("api_test", { config: config(mode, baseUrl, apiKey, model) });
 }
 
-export async function chatWithOllama(model, messages, signal, overrides = {}) {
-  const options = {
-    // Ollama otherwise uses the model's 32K context. For a 32B model that KV
-    // cache alone can consume about 8GB and force weights back onto the CPU.
-    // 8K is sufficient for this app's bounded prompts and keeps local inference
-    // on the GPU on common 24GB cards.
-    num_ctx: 8192,
-    num_predict: 1024,
-    temperature: 0.7,
-    ...overrides,
-  };
-  const response = await fetch(`${OLLAMA_BASE}/api/chat`, {
-    method: "POST", signal, headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages, stream: false, keep_alive: "30m", options }),
-  });
-  if (!response.ok) throw new Error(`Ollama 返回 ${response.status}`);
-  const data = await response.json();
-  return data?.message?.content || "服务没有返回有效内容。";
-}
-
-export async function chatWithCloud(baseUrl, apiKey, model, messages, signal) {
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST", signal,
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ model, messages, stream: false }),
-  });
-  if (!response.ok) throw new Error(`云端服务返回 ${response.status}`);
-  const data = await response.json();
-  return data?.choices?.[0]?.message?.content || "服务没有返回有效内容。";
+export async function chatWithCloud(mode, baseUrl, apiKey, model, messages, signal) {
+  if (signal?.aborted) throw new DOMException("请求已取消", "AbortError");
+  const requestId = crypto.randomUUID();
+  const cancel = () => { invoke("api_cancel_request", { requestId }).catch(() => {}); };
+  signal?.addEventListener("abort", cancel, { once: true });
+  try {
+    const reply = await invoke("api_generate", {
+      requestId,
+      config: config(mode, baseUrl, apiKey, model),
+      messages,
+    });
+    if (signal?.aborted) throw new DOMException("请求已取消", "AbortError");
+    return reply?.text || "服务没有返回有效内容。";
+  } catch (error) {
+    if (signal?.aborted || String(error).includes("请求已取消")) throw new DOMException("请求已取消", "AbortError");
+    throw error instanceof Error ? error : new Error(String(error));
+  } finally {
+    signal?.removeEventListener("abort", cancel);
+  }
 }

@@ -22,7 +22,16 @@ export function addOption(select, value, label = value) {
   select.append(option);
 }
 
-export function downloadJson(filename, content) {
+export async function downloadJson(filename, content) {
+  const file = new File([content], filename, { type: "application/json" });
+  if (navigator.share && navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ title: filename, files: [file] });
+      return;
+    } catch (error) {
+      if (error?.name === "AbortError") return;
+    }
+  }
   const url = URL.createObjectURL(new Blob([content], { type: "application/json" }));
   const anchor = document.createElement("a");
   anchor.href = url;

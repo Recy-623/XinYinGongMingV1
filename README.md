@@ -1,45 +1,46 @@
-# 心印共鸣
+# 心印共鸣 V4.9 Android
 
-本地优先的 AI 角色聊天桌面应用，支持本地 Ollama 与兼容 OpenAI 的云端 API。
+仅通过用户配置的 HTTPS 模型 API 运行的 Android 版心印共鸣。它不依赖 Ollama，不访问电脑上的微信、QQ 数据库，也不内置第三方聊天提取器。
 
-## 开发
+## 已实现
+
+- OpenAI Responses API 与兼容 OpenAI Chat Completions 的 HTTPS 服务。
+- 角色创建、角色卡导入导出、完整数据备份、角色聊天和关系聊天蒸馏。
+- System Prompt 最多 50,000 字符；首页可删除当前选中的角色及其本地聊天记录，并要求不可撤销确认。
+- 聊天中的 `[...]` 与 `【...】` 被视为仅本轮有效的导演层控制信号：界面保留原文，模型用户历史会逐轮净化，纯导演消息以“角色内保持沉默”代替台词。
+- 从 Android 文件选择器导入微信、QQ 或其他工具导出的 JSON、TXT、HTML、MHT、CSV。
+- 手机安全区、抽屉导航、系统返回键、软键盘输入区和分享面板适配。
+- API Key 使用用户密码经 Argon2id 派生密钥，再以 AES-256-GCM 加密后保存到应用私有目录；也可只在本次运行内存中使用。
+
+## 使用
+
+1. 安装 APK，打开“模型 API”。
+2. 选择 OpenAI Responses 或兼容 Chat Completions，填写 HTTPS 地址、模型和 API Key。
+3. 可先测试连接，再保存；不希望落盘时不要勾选“加密保存”。
+4. 导入聊天记录蒸馏前，应用会显示目标 API 域名和将要发送的消息上限，必须再次确认。
+
+OpenAI Responses 请求显式设置 `store: false`。兼容服务如何保存请求由对应服务商决定，请在上传私人聊天前阅读其隐私政策。
+
+## 隐私边界
+
+- API Key 不写入角色卡、完整备份、日志或前端持久状态。
+- 原始聊天文件仅在导入页面内存中解析；生成的角色卡只保留摘要、关系判断和来源统计，不保存整份原文。
+- 关系蒸馏最多向 API 均匀抽取 800 条双方消息，不会静默上传整份文件。
+- 只有用户有权访问并获得相关参与者同意的数据才应导入。
+
+更完整的威胁边界见 [SECURITY.md](SECURITY.md)。
+
+## 开发与构建
 
 ```powershell
-npm.cmd run tauri dev
+npm install
+npm test
+npm run build
+npm run tauri android build -- --apk --target aarch64
 ```
 
-## 数据与隐私
+Android 构建需要 JDK 17、Android SDK、NDK 和 Rust Android 目标。仓库中的 `.tooling` 仅用于本机可复现构建并已被 Git 忽略。
 
-- 角色、头像和聊天记录保存在应用 WebView 的本地存储中。
-- API Key 只保存在当前运行的内存中；关闭应用后需要重新输入，备份文件也不会包含它。
-- 可从控制台导出完整备份或不含聊天记录的角色卡。
+本机 release APK 的私钥位于 `.tooling/signing`，密码只以当前 Windows 用户可解密的 DPAPI 密文保存。若要让后续 APK 直接覆盖安装本版本，必须安全备份该目录；不要提交到 Git 或发给他人。正式上架应用商店前应改用专门的生产签名密钥。
 
-## 从微信或 QQ 创建关系角色
-
-1. 在模型区域连接本地 Ollama，或验证兼容 OpenAI 的云端 API。
-2. 点击“从微信 / QQ 聊天记录创建关系角色”。
-3. 微信可以连接用户自行安装、初始化的 `wx-cli` Windows EXE；QQ 可以检测本机 `qq-chat-exporter`，也可以直接选择其导出的 JSON。
-4. 确认哪一个发言者是自己、哪一个是对方，然后开始蒸馏。
-5. 审阅人格、关系、相处模式和共同故事后再创建角色。
-
-心印共鸣不内置、下载或更新第三方导出工具，不执行 `wx init`、不主动提权、不读取数据库密钥，也不控制 QQ/NapCat 登录。微信连接器只执行固定的 `sessions --json` 和 `history ... --json` 只读命令；QQ 连接器只检测 `127.0.0.1:40653`，实际导出仍由用户在 qq-chat-exporter 中完成。
-
-第三方工具属于独立信任边界：`wx-cli` 可能维护自己的数据库密钥和解密缓存，`qq-chat-exporter`/NapCat 可能持有 QQ 登录状态。详细边界见 [SECURITY.md](SECURITY.md)。
-
-原始聊天只在导入过程中读取；角色卡保存经用户确认的蒸馏结果和来源统计，不保存整份原文。使用本地 Ollama 时记录不会离开电脑；使用云端模型时，抽取的聊天片段会发送给用户配置的 API 服务。
-
-### 已解密 QQ Android NT 快照（高级）
-
-仓库提供 `scripts/qq_nt_export.py`，用于把用户自己拥有、已经在应用之外解密并复制出的 QQ Android NT `nt_msg` 数据库快照转换为心印共鸣可直接导入的 JSON。脚本不会连接正在运行的 QQ，不会获取登录状态、推导密钥或解密数据库。
-
-```powershell
-python scripts\qq_nt_export.py `
-  --database D:\path\to\nt_msg.decrypted.db `
-  --self-uid <自己的 UID> `
-  --peer-uid <对方的 UID> `
-  --self-name "我的昵称" `
-  --peer-name "对方昵称" `
-  --output D:\path\to\chat-xinyin.json
-```
-
-脚本以只读模式查询复制出的快照，限制单次读取规模和字段长度，输出只包含平台、参与者统计以及 `sender`、`time`、`content` 三个消息字段。UID、原始二进制、数据库密钥、登录状态和可点击链接不会写入结果。请勿把 QQ 正在使用的数据库文件直接交给脚本。
+仓库保留的 `scripts/qq_nt_export.py` 是高级离线转换工具，只读取用户事先在应用外准备好的已解密数据库快照；APK 不会调用它。

@@ -2,38 +2,170 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>心印共鸣</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#12121a">
+  <title>心印共鸣 V4.9</title>
   <link rel="stylesheet" href="styles.css">
-  <link rel="stylesheet" href="connectors.css">
 </head>
 <body>
   <main id="portal-view" class="view-container active">
     <section class="portal-card">
-      <h1>心印共鸣</h1><p class="subtitle">本地优先的 AI 角色聊天</p>
-      <div class="profile-row control-group"><img id="user-global-avatar-preview" class="profile-avatar" alt="用户头像"><input id="user-global-avatar-file" type="file" accept="image/*" hidden><label>我的称呼<input id="user-global-name-input" type="text" maxlength="80" placeholder="请输入昵称"></label></div>
-      <label class="control-group">模型提供商<select id="api-provider-select"><option value="ollama">本地 Ollama</option><option value="openai">兼容 OpenAI 的云端 API</option></select></label>
-      <section id="cloud-api-panel" class="cloud-api-panel hidden"><label class="control-group">API Base URL<input id="api-url-input" type="url" placeholder="https://api.deepseek.com/v1"></label><label class="control-group">API Key（仅本次运行保留）<input id="api-key-input" type="password" autocomplete="off" placeholder="sk-..."></label><label class="control-group">测试用模型 / 手动模型 ID<input id="manual-model-input" type="text" maxlength="200" placeholder="例如 deepseek-chat"></label><button id="test-cloud-btn" class="btn btn-secondary">测试云端连接</button></section>
-      <label class="control-group">AI 模型<div class="model-refresh-wrapper"><select id="model-select"><option value="">正在加载…</option></select><button id="refresh-models-btn" class="btn btn-secondary">刷新</button></div></label>
-      <div class="control-group"><label>选择共鸣角色</label><div id="character-selector-grid" class="character-grid"></div></div>
-      <button id="relationship-import-btn" class="btn btn-secondary btn-block relationship-import-btn">从微信 / QQ 聊天记录创建关系角色</button>
-      <button id="enter-chat-btn" class="btn btn-primary btn-block">进入聊天</button>
-      <footer class="portal-footer"><button id="system-export-btn" class="text-button">备份全部数据</button><span>|</span><button id="system-import-btn" class="text-button">恢复备份</button></footer>
+      <header class="brand-header">
+        <span class="version-pill">V4.9 · Android</span>
+        <h1>心印共鸣</h1>
+        <p class="subtitle">纯 API 的关系角色聊天</p>
+      </header>
+
+      <section class="panel profile-panel">
+        <h2>我</h2>
+        <div class="profile-row">
+          <button id="user-avatar-button" class="avatar-button" type="button" aria-label="更换我的头像">
+            <img id="user-global-avatar-preview" class="profile-avatar" alt="用户头像">
+          </button>
+          <input id="user-global-avatar-file" type="file" accept="image/*" hidden>
+          <label>我的称呼<input id="user-global-name-input" type="text" maxlength="80" placeholder="请输入称呼"></label>
+        </div>
+      </section>
+
+      <section class="panel api-panel">
+        <div class="section-heading">
+          <div><h2>模型 API</h2><p>此版本不连接 Ollama，也不访问本机模型。</p></div>
+          <span id="api-connection-badge" class="status-badge offline">未连接</span>
+        </div>
+        <label class="control-group">接口模式
+          <select id="api-mode-select">
+            <option value="openai-responses">OpenAI 官方 Responses API</option>
+            <option value="compatible-chat">兼容 OpenAI 的 Chat Completions</option>
+          </select>
+        </label>
+        <label class="control-group">API Base URL
+          <input id="api-url-input" type="url" inputmode="url" autocapitalize="none" spellcheck="false" value="https://api.openai.com/v1">
+        </label>
+        <label class="control-group">API Key
+          <input id="api-key-input" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="仅在当前运行内存中使用">
+        </label>
+        <details class="vault-box">
+          <summary>加密保存 API Key（可选）</summary>
+          <p>使用 Argon2id 与 AES-256-GCM 加密保险箱。口令不会保存；每次启动需要重新输入。</p>
+          <label class="control-group">保险箱口令
+            <input id="vault-password-input" type="password" autocomplete="off" minlength="8" maxlength="128" placeholder="8–128 个字符">
+          </label>
+          <div class="button-row wrap">
+            <button id="unlock-vault-btn" class="btn btn-secondary" type="button">解锁并读取</button>
+            <button id="save-key-btn" class="btn btn-secondary" type="button">加密保存当前 Key</button>
+            <button id="forget-key-btn" class="btn btn-danger" type="button">删除已保存 Key</button>
+          </div>
+          <p id="vault-status" class="inline-status" aria-live="polite"></p>
+        </details>
+        <div class="model-grid">
+          <label class="control-group">手动模型 ID
+            <input id="manual-model-input" type="text" maxlength="200" autocapitalize="none" spellcheck="false" placeholder="例如 gpt-5-mini">
+          </label>
+          <label class="control-group">已读取模型
+            <select id="model-select"><option value="">可手动填写或读取列表</option></select>
+          </label>
+        </div>
+        <label class="consent-row">
+          <input id="cloud-consent-check" type="checkbox">
+          <span>我理解：聊天内容和蒸馏时选取的聊天片段会发送到上方显示的 API 域名，并受该服务商隐私政策约束。</span>
+        </label>
+        <div class="button-row">
+          <button id="test-cloud-btn" class="btn btn-primary" type="button">测试 API</button>
+          <button id="refresh-models-btn" class="btn btn-secondary" type="button">读取模型列表</button>
+        </div>
+        <p id="api-status" class="inline-status" aria-live="polite"></p>
+      </section>
+
+      <section class="panel">
+        <div class="section-heading"><div><h2>共鸣角色</h2><p>角色卡和聊天保存在应用私有存储中。</p></div></div>
+        <div id="character-selector-grid" class="character-grid"></div>
+        <button id="delete-character-btn" class="btn btn-danger btn-block" type="button">删除当前角色</button>
+        <button id="relationship-import-btn" class="btn btn-secondary btn-block" type="button">从微信 / QQ 聊天文件创建关系角色</button>
+        <button id="enter-chat-btn" class="btn btn-primary btn-block primary-action" type="button">进入聊天</button>
+      </section>
+
+      <footer class="portal-footer">
+        <button id="system-export-btn" class="text-button" type="button">分享全部备份</button>
+        <span>·</span>
+        <button id="system-import-btn" class="text-button" type="button">从手机文件恢复</button>
+      </footer>
     </section>
   </main>
-  <main id="chitchat-view" class="view-container"><aside class="chat-sidebar"><button id="back-btn" class="btn btn-secondary">返回控制台</button><div id="sidebar-character-list" class="sidebar-list"></div></aside><section class="chat-main"><header class="chat-header"><div class="chat-partner-info"><img id="chat-partner-avatar" alt="角色头像"><div><h2 id="chat-partner-name">加载中</h2><span id="chat-partner-status" class="status-badge"></span></div></div><div class="header-actions"><button id="clear-history-btn" class="btn btn-secondary">清空记录</button><button id="character-config-btn" class="btn btn-secondary">编辑角色</button></div></header><div id="chat-box" class="chat-box"></div><div class="chat-input-area"><textarea id="chat-input-field" placeholder="Enter 发送，Shift+Enter 换行"></textarea><button id="chat-cancel-btn" class="btn btn-secondary" hidden>取消</button><button id="chat-send-btn" class="btn btn-primary">发送</button></div></section></main>
-  <div id="config-modal" class="modal-overlay" role="dialog" aria-modal="true"><section class="modal-card"><header class="modal-header"><h3>编辑角色</h3><button id="modal-close-btn" class="text-button" aria-label="关闭">×</button></header><div class="modal-body"><label class="control-group">姓名<input id="config-char-name" type="text" maxlength="80"></label><label class="control-group">头像<input id="config-char-avatar-file" type="file" accept="image/*"><img id="config-char-avatar-preview" class="config-avatar" alt="头像预览"></label><label class="control-group">System Prompt<textarea id="config-char-prompt" rows="8" maxlength="12000"></textarea></label><div class="migration-btn-group"><button id="single-card-export-btn" class="btn btn-secondary">导出角色卡</button><button id="single-card-import-btn" class="btn btn-secondary">导入角色卡</button></div></div><footer class="modal-footer"><button id="modal-cancel-btn" class="btn btn-secondary">取消</button><button id="modal-save-btn" class="btn btn-primary">保存</button></footer></section></div>
-  <div id="relationship-import-modal" class="modal-overlay" role="dialog" aria-modal="true">
-    <section class="modal-card import-card">
-      <header class="modal-header"><div><h3>从聊天记录创建关系角色</h3><small>原始记录只在本次导入中读取，不会写入角色卡</small></div><button id="import-close-btn" class="text-button" aria-label="关闭">×</button></header>
+
+  <main id="chitchat-view" class="view-container">
+    <div id="sidebar-backdrop" class="sidebar-backdrop" hidden></div>
+    <aside id="chat-sidebar" class="chat-sidebar">
+      <div class="sidebar-top">
+        <strong>角色</strong>
+        <button id="sidebar-close-btn" class="icon-button" type="button" aria-label="关闭角色列表">×</button>
+      </div>
+      <div id="sidebar-character-list" class="sidebar-list"></div>
+      <button id="back-btn" class="btn btn-secondary btn-block" type="button">返回控制台</button>
+    </aside>
+    <section class="chat-main">
+      <header class="chat-header">
+        <button id="sidebar-open-btn" class="icon-button mobile-only" type="button" aria-label="打开角色列表">☰</button>
+        <div class="chat-partner-info">
+          <img id="chat-partner-avatar" alt="角色头像">
+          <div><h2 id="chat-partner-name">加载中</h2><span id="chat-partner-status" class="chat-status"></span></div>
+        </div>
+        <div class="header-actions">
+          <button id="character-config-btn" class="icon-button" type="button" aria-label="编辑角色">✎</button>
+          <button id="clear-history-btn" class="icon-button" type="button" aria-label="清空聊天">⌫</button>
+        </div>
+      </header>
+      <div id="chat-box" class="chat-box" aria-live="polite"></div>
+      <div class="chat-input-area">
+        <textarea id="chat-input-field" rows="1" maxlength="20000" placeholder="说点什么…"></textarea>
+        <button id="chat-cancel-btn" class="btn btn-secondary" type="button" hidden>取消</button>
+        <button id="chat-send-btn" class="btn btn-primary" type="button">发送</button>
+      </div>
+    </section>
+  </main>
+
+  <div id="config-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="config-title">
+    <section class="modal-card">
+      <header class="modal-header"><h3 id="config-title">编辑角色</h3><button id="modal-close-btn" class="icon-button" type="button" aria-label="关闭">×</button></header>
       <div class="modal-body">
-        <section id="import-file-step"><p class="privacy-note">请选择微信或 QQ 客户端导出、备份工具导出或复制保存的聊天记录。程序会自动识别常见文本、HTML/MHT 和结构化排版。使用本地 Ollama 时记录不会离开电脑；选择云端模型时，抽取的聊天片段会发送给当前 API 服务。</p><section class="connector-panel"><h4>微信本机连接器（可选）</h4><p>仅连接用户自行安装并已初始化的 <code>wx-cli</code> Windows EXE。本程序不会下载工具、执行初始化、提权、读取密钥或管理其缓存。</p><label class="consent-row"><input id="wx-consent-check" type="checkbox"> 我确认仅导入我有权访问的微信记录，并同意调用本机 wx-cli 的只读查询。</label><div class="connector-actions"><button id="wx-detect-btn" class="btn btn-secondary" type="button">检测 wx-cli</button><button id="wx-sessions-btn" class="btn btn-secondary" type="button" disabled>读取会话列表</button></div><p id="wx-status" class="connector-status"></p><div id="wx-history-fields" hidden><label>选择会话<select id="wx-session-select"></select></label><div class="identity-grid"><label>开始日期（可选）<input id="wx-since-input" type="date"></label><label>结束日期（可选）<input id="wx-until-input" type="date"></label></div><label>最多读取消息数<input id="wx-limit-input" type="number" min="1" max="1600" value="1200"></label><button id="wx-history-btn" class="btn btn-secondary btn-block" type="button">读取此会话并进入蒸馏</button></div></section><section class="connector-panel"><h4>QQ 本机导出器（可选）</h4><p>只检测 <code>127.0.0.1:40653</code> 是否有 qq-chat-exporter 服务，不发送 Token、不控制 QQ、不执行扫码登录。</p><div class="connector-actions"><button id="qq-detect-btn" class="btn btn-secondary" type="button">检测 QQ 导出器</button><button id="qq-select-export-btn" class="btn btn-secondary" type="button">选择 QCE 导出的 JSON</button></div><p id="qq-status" class="connector-status"></p></section><label class="file-drop">也可以直接选择微信 / QQ 聊天记录<input id="relationship-chat-file" type="file" accept=".txt,.html,.htm,.mht,.mhtml,.json,text/plain,text/html,application/json"></label><div id="import-file-summary" class="import-summary"></div><div id="identity-fields" class="identity-grid" hidden><label>哪一个是我<select id="import-self-select"></select></label><label>哪一个是对方<select id="import-other-select"></select></label></div><button id="start-distill-btn" class="btn btn-primary btn-block" disabled>开始理解这段关系</button></section>
-        <section id="import-progress-step" hidden><div class="distill-progress"><div class="spinner"></div><p id="distill-progress-text">正在准备…</p><small>记录较多时需要多次调用当前模型，请保持应用开启。</small></div><button id="cancel-distill-btn" class="btn btn-secondary btn-block">取消蒸馏</button></section>
-        <section id="import-review-step" hidden><p class="privacy-note">这是模型根据证据生成的草稿。请修改误判后再创建角色；不确定项不会作为确定事实。</p><label class="control-group">对方的名字<input id="review-role-name" type="text" maxlength="80"></label><label class="control-group">稳定人格<textarea id="review-personality" rows="4"></textarea></label><label class="control-group">语言和表达习惯（每行一项）<textarea id="review-speech-style" rows="4"></textarea></label><label class="control-group">你们的关系<textarea id="review-relationship" rows="4"></textarea></label><label class="control-group">相处模式（每行一项）<textarea id="review-patterns" rows="4"></textarea></label><label class="control-group">共同故事（JSON，可删除不希望保留的故事）<textarea id="review-memories" rows="10"></textarea></label><details><summary>共同称呼、梗、边界与不确定项</summary><label class="control-group">称呼（每行一项）<textarea id="review-nicknames" rows="3"></textarea></label><label class="control-group">共同梗（每行一项）<textarea id="review-jokes" rows="3"></textarea></label><label class="control-group">边界（每行一项）<textarea id="review-boundaries" rows="3"></textarea></label><label class="control-group">不确定项（每行一项）<textarea id="review-uncertainties" rows="3"></textarea></label></details><div id="review-coverage" class="import-summary"></div><button id="create-distilled-role-btn" class="btn btn-primary btn-block">确认并创建关系角色</button></section>
+        <label class="control-group">姓名<input id="config-char-name" type="text" maxlength="80"></label>
+        <label class="control-group">头像<input id="config-char-avatar-file" type="file" accept="image/*"><img id="config-char-avatar-preview" class="config-avatar" alt="头像预览"></label>
+        <label class="control-group">System Prompt（最多 50,000 字符）<textarea id="config-char-prompt" rows="8" maxlength="50000" aria-describedby="system-prompt-counter"></textarea><small id="system-prompt-counter" class="field-counter">0 / 50,000</small></label>
+        <div class="button-row wrap"><button id="single-card-export-btn" class="btn btn-secondary" type="button">分享角色卡</button><button id="single-card-import-btn" class="btn btn-secondary" type="button">导入角色卡</button></div>
+      </div>
+      <footer class="modal-footer"><button id="modal-cancel-btn" class="btn btn-secondary" type="button">取消</button><button id="modal-save-btn" class="btn btn-primary" type="button">保存</button></footer>
+    </section>
+  </div>
+
+  <div id="relationship-import-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="import-title">
+    <section class="modal-card import-card">
+      <header class="modal-header"><div><h3 id="import-title">从聊天记录创建关系角色</h3><small>原始聊天只用于本次分析，不写入角色卡。</small></div><button id="import-close-btn" class="icon-button" type="button" aria-label="关闭">×</button></header>
+      <div class="modal-body">
+        <section id="import-file-step">
+          <p class="privacy-note">请选择你有权使用的微信、QQ 或提取工具导出的 JSON、TXT、HTML、MHT、CSV 文件。开始蒸馏后，均匀抽取的片段会发送给当前 API 服务商。</p>
+          <label class="file-drop">从手机文件中选择聊天记录<input id="relationship-chat-file" type="file" accept=".txt,.html,.htm,.mht,.mhtml,.json,.csv,text/plain,text/html,application/json,text/csv"></label>
+          <div id="import-file-summary" class="import-summary">尚未选择记录</div>
+          <div id="identity-fields" class="identity-grid" hidden><label>哪一个是我<select id="import-self-select"></select></label><label>哪一个是对方<select id="import-other-select"></select></label></div>
+          <button id="start-distill-btn" class="btn btn-primary btn-block" type="button" disabled>开始理解这段关系</button>
+        </section>
+        <section id="import-progress-step" hidden><div class="distill-progress"><div class="spinner"></div><p id="distill-progress-text">正在准备…</p><small>请保持网络连接和应用前台运行。</small></div><button id="cancel-distill-btn" class="btn btn-secondary btn-block" type="button">取消蒸馏</button></section>
+        <section id="import-review-step" hidden>
+          <p class="privacy-note">这是模型根据证据生成的草稿。请先修改误判；不确定信息不会当作确定事实。</p>
+          <label class="control-group">对方的名字<input id="review-role-name" type="text" maxlength="80"></label>
+          <label class="control-group">稳定人格<textarea id="review-personality" rows="4"></textarea></label>
+          <label class="control-group">语言和表达习惯（每行一项）<textarea id="review-speech-style" rows="4"></textarea></label>
+          <label class="control-group">你们的关系<textarea id="review-relationship" rows="4"></textarea></label>
+          <label class="control-group">相处模式（每行一项）<textarea id="review-patterns" rows="4"></textarea></label>
+          <label class="control-group">共同故事（JSON）<textarea id="review-memories" rows="10"></textarea></label>
+          <details><summary>称呼、梗、边界与不确定项</summary><label class="control-group">称呼（每行一项）<textarea id="review-nicknames" rows="3"></textarea></label><label class="control-group">共同梗（每行一项）<textarea id="review-jokes" rows="3"></textarea></label><label class="control-group">边界（每行一项）<textarea id="review-boundaries" rows="3"></textarea></label><label class="control-group">不确定项（每行一项）<textarea id="review-uncertainties" rows="3"></textarea></label></details>
+          <div id="review-coverage" class="import-summary"></div>
+          <button id="create-distilled-role-btn" class="btn btn-primary btn-block" type="button">确认并创建关系角色</button>
+        </section>
       </div>
     </section>
   </div>
-  <input id="single-card-import-file" type="file" accept="application/json,.json" hidden><input id="system-import-file" type="file" accept="application/json,.json" hidden>
+
+  <input id="single-card-import-file" type="file" accept="application/json,.json" hidden>
+  <input id="system-import-file" type="file" accept="application/json,.json" hidden>
   <script type="module" src="main.js"></script>
 </body>
 </html>

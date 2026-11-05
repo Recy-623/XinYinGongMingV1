@@ -1,29 +1,34 @@
 {
   "$schema": "./target/schema.json",
-  "version": "0.1.0",
-  "identifier": "com.xinying.gongming",
-  "productName": "心印共鸣",
+  "version": "4.9.2",
+  "identifier": "com.byrecy.xinyingongming",
+  "productName": "心印共鸣 V4.9",
   "build": {
-    "beforeDevCommand": "",
-    "beforeBuildCommand": "",
-    "devUrl": null,
-    "frontendDist": "../src"
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
   },
   "app": {
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "心印共鸣",
-        "width": 800,
-        "height": 600
+        "title": "心印共鸣 V4.9",
+        "width": 430,
+        "height": 840,
+        "minWidth": 320,
+        "minHeight": 568
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' https: http://localhost:11434; img-src 'self' data: https:; style-src 'self'; script-src 'self'; font-src 'self'"
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; img-src 'self' data: blob: https:; style-src 'self'; script-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; frame-src 'none'"
     }
   },
   "bundle": {
-  "active": true,
-  "targets": []
+    "active": true,
+    "targets": [],
+    "android": {
+      "minSdkVersion": 26
+    }
   }
 }
