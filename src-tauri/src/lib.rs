@@ -1,4 +1,3 @@
-mod device_probe;
 use rusqlite::{params, Connection};
 use serde_json::Value;
 use std::{
@@ -105,21 +104,17 @@ fn db_upsert_memories(app: AppHandle, items: Vec<Value>) -> Result<(), String> {
 fn db_list_memories(app: AppHandle, character_id: String, limit: u16) -> Result<Vec<Value>, String> {
     let connection = database(&app)?;
     let mut statement = connection.prepare(
-        "SELECT payload_json,last_used_at,use_count,status,mention_policy FROM memory_items
+        "SELECT payload_json,last_used_at,use_count FROM memory_items
          WHERE character_id=?1 ORDER BY importance DESC, updated_at DESC LIMIT ?2"
     ).map_err(|error| error.to_string())?;
     let rows = statement.query_map(params![character_id, limit.min(1000)], |row| {
         let payload: String = row.get(0)?;
         let last_used_at: String = row.get(1)?;
         let use_count: i64 = row.get(2)?;
-        let status: String = row.get(3)?;
-        let mention_policy: String = row.get(4)?;
         let mut value: Value = serde_json::from_str(&payload).unwrap_or(Value::Null);
         if let Some(object) = value.as_object_mut() {
             object.insert("lastUsedAt".into(), Value::String(last_used_at));
             object.insert("useCount".into(), Value::Number(use_count.into()));
-            object.insert("status".into(), Value::String(status));
-            object.insert("mentionPolicy".into(), Value::String(mention_policy));
         }
         Ok(value)
     }).map_err(|error| error.to_string())?;
@@ -541,12 +536,9 @@ fn export_json_file(app: AppHandle, filename: String, content: String) -> Result
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .manage(device_probe::ProbeState::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
-            device_probe::device_scan,
-            device_probe::device_inspect,
             detect_wx_cli,
             detect_qq_exporter,
             wx_sessions,

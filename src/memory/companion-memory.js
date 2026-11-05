@@ -38,8 +38,6 @@ export function normalizeMemory(value, characterId = "") {
     id: clean(value?.id, 120) || `memory_${fingerprint}`,
     characterId: clean(value?.characterId, 120) || clean(characterId, 120),
     memoryType,
-    sourceType: ["canon", "chat", "user_defined"].includes(value?.sourceType) ? value.sourceType : "unspecified",
-    sourceRefs: unique(value?.sourceRefs, 10, 1000),
     summary,
     keywords: unique(value?.keywords),
     semanticTerms: unique(value?.semanticTerms?.length ? value.semanticTerms : memoryTerms(summary), 50),
@@ -70,7 +68,6 @@ export function rankRelevantMemories(memories, query, limit = 5, characterBudget
       if (memory.status !== "active" || memory.mentionPolicy === "never") return null;
       const semantic = overlap(queryTerms, memory.semanticTerms);
       const lexical = queryTerms.filter((term) => `${memory.summary} ${memory.keywords.join(" ")}`.toLowerCase().includes(term)).length;
-      if (!lexical && !semantic) return null;
       return { ...raw, ...memory, score: lexical * 2.2 + semantic * 8 + memory.importance * 2 + memory.confidence + (memory.confirmed ? 1.5 : 0) };
     })
     .filter((memory) => memory && (memory.score >= 1.2 || memory.importance >= 0.95))
@@ -81,25 +78,6 @@ export function rankRelevantMemories(memories, query, limit = 5, characterBudget
       used += length; return true;
     })
     .slice(0, limit);
-}
-
-export function cardMemorySeeds(character, existing = []) {
-  return (character.memories || []).flatMap((memory) => {
-    if (!memory?.title || !memory?.summary) return [];
-    const subjectKey = `card:${memory.title}`;
-    const previous = existing.find((item) => item.subjectKey === subjectKey);
-    // Keep seed IDs and user lifecycle choices stable across recategorization.
-    const legacyId = normalizeMemory({ memoryType: "relationship", subjectKey }, character.id).id;
-    return [normalizeMemory({
-      ...previous, id: previous?.id || legacyId, characterId: character.id,
-      memoryType: memory.memoryType || "relationship",
-      sourceType: memory.sourceType, sourceRefs: memory.sourceRefs,
-      summary: `${memory.title}：${memory.summary}${memory.emotionalMeaning ? `（意义：${memory.emotionalMeaning}）` : ""}`,
-      keywords: [memory.title, ...(memory.keywords || [])], semanticTerms: [],
-      importance: previous?.importance ?? 0.8, confidence: memory.confidence ?? 0.8,
-      confirmed: true, scope: "identity", mentionPolicy: previous?.mentionPolicy || "relevant", subjectKey,
-    }, character.id)];
-  });
 }
 
 export function shouldExtractMemory({ userText = "", history = [], lastIndex = 0 } = {}) {
@@ -119,7 +97,7 @@ export function parseMemoryExtraction(raw, characterId) {
   return {
     summary: clean(data?.summary, 4000),
     memories: (Array.isArray(data?.memories) ? data.memories : [])
-      .map((item) => normalizeMemory({ ...item, sourceType: "chat", sourceRefs: [] }, characterId)).filter((item) => item.summary),
+      .map((item) => normalizeMemory(item, characterId)).filter((item) => item.summary),
     relationshipProposal: clean(data?.relationshipProposal, 300),
   };
 }

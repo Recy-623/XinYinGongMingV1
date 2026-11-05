@@ -143,7 +143,7 @@ export function normalizeTimeline(value, fallback = {}) {
   let checkpoints = Array.isArray(value?.checkpoints)
     ? value.checkpoints.map(normalizeCheckpoint).filter(Boolean).slice(0, MAX_CHECKPOINTS)
     : [];
-  if (!checkpoints.length && !Array.isArray(value?.checkpoints)) checkpoints = [currentCheckpoint(fallback)];
+  if (!checkpoints.length) checkpoints = [currentCheckpoint(fallback)];
   checkpoints.sort((a, b) => a.cutoffTime.localeCompare(b.cutoffTime));
   const ids = new Set(checkpoints.map((checkpoint) => checkpoint.id));
   const branches = Array.isArray(value?.branches)

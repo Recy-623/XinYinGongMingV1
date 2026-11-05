@@ -53,9 +53,6 @@ function normalizeMemories(value) {
       time: text(memory.time, 100), title, summary,
       emotionalMeaning: text(memory.emotionalMeaning, 1000),
       keywords: stringList(memory.keywords, 20, 80),
-      memoryType: ["episodic", "relationship", "preference", "open_loop"].includes(memory.memoryType) ? memory.memoryType : "relationship",
-      sourceType: ["canon", "chat", "user_defined"].includes(memory.sourceType) ? memory.sourceType : "unspecified",
-      sourceRefs: stringList(memory.sourceRefs, 10, 1000),
       confidence: Math.max(0, Math.min(1, Number(memory.confidence) || 0)),
     }];
   });
@@ -63,8 +60,6 @@ function normalizeMemories(value) {
 
 function normalizeRelationshipEvidence(value) {
   return {
-    sourceType: ["canon", "chat", "user_defined"].includes(value?.sourceType) ? value.sourceType : "unspecified",
-    sourceRefs: stringList(value?.sourceRefs, 10, 1000),
     observedStage: text(value?.observedStage, 300),
     summary: text(value?.summary, 3000),
     confidence: Math.max(0, Math.min(1, Number(value?.confidence) || 0)),
@@ -206,7 +201,7 @@ export function readBackup(value) {
 export function serializeCard(character) {
   const normalized = normalizeCharacter(character);
   if (!normalized) throw new Error("角色数据不完整");
-  const { worldbook, contextState, ...portable } = normalized;
+  const { worldbook, ...portable } = normalized;
   return JSON.stringify({
     version: CARD_VERSION, experienceMode: EXPERIENCE_MODE, ...portable,
     worldbookRef: worldbook

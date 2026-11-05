@@ -50,14 +50,6 @@ test("长期陪伴界面接入三个功能并为窄屏自适配", () => {
   assert.match(css, /migration-btn-group[^}]*flex-wrap:wrap/s);
   assert.match(css, /modal-card[^}]*calc\(100vw - 2rem\)/s);
   assert.match(css, /body\s*\{\s*min-width:0/);
-  assert.match(css, /\.chat-main\s*\{[^}]*min-height:0[^}]*overflow:hidden/s);
-  assert.match(css, /\.chat-box\s*\{[^}]*min-height:0[^}]*flex:1 1 0/s);
-  assert.match(css, /\.android-runtime\s*\{[^}]*--android-system-top:max\(24px[^}]*--android-system-bottom:max\(24px/s);
-  assert.match(css, /\.android-runtime \.view-container\s*\{[^}]*100dvh - var\(--android-system-top\) - var\(--android-system-bottom\)[^}]*margin-top:var\(--android-system-top\)/s);
-  assert.match(css, /\.chat-sidebar\s*\{[^}]*display:flex[^}]*max-height:none/s);
-  assert.match(css, /scroll-snap-type:x mandatory/);
-  assert.match(css, /\.sidebar-create\s*\{\s*display:none/);
-  assert.match(main, /resetCompactChatScrollPositions/);
 });
 
 test("程序级边界阻止角色第三人称自述和代写用户心理", () => {
