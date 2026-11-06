@@ -81,3 +81,6 @@ connectors/*.dll
 *.njsproj
 *.sln
 *.sw?
+
+# Encrypted local credentials (never commit)
+*.dpapi

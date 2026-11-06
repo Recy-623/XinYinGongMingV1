@@ -23,7 +23,7 @@ import { replyAuditCorrection, replyAuditMessages, replyAuditResult } from "./qu
 
 let state = loadState();
 let isEditMode = false;
-let sessionApiKey = ""; // Intentionally memory-only: never written to disk or backups.
+let sessionApiKey = ""; // Plaintext is memory-only; optional DPAPI storage is separate from state/backups.
 let activeRequest = null;
 let importSession = { parsed: null, result: null, controller: null };
 let wxCliDetected = false;
@@ -252,7 +252,11 @@ async function testCloudConnection() {
     button.disabled = true; button.textContent = "验证中…";
     await testCloud(baseUrl, key, model);
     state.globals.cloudApiUrl = baseUrl; sessionApiKey = key; save();
-    alert("连接成功。密钥仅在本次应用运行期间保留。");
+    if ($("remember-api-key").checked) {
+      await window.__TAURI__.core.invoke("vault_save", {baseUrl, apiKey:key});
+      $("vault-status").textContent = "已在本机加密保存；不会进入角色卡或备份。";
+    } else { await window.__TAURI__.core.invoke("vault_delete"); }
+    alert("连接成功。" + ($("remember-api-key").checked ? "下次启动将自动读取本机密钥。" : "密钥仅在本次运行保留。"));
     await refreshModels();
   } catch (error) { invalidateCloudCredentials(); alert(error.message || "无法连接云端服务"); }
   finally { button.disabled = false; button.textContent = "测试云端连接"; }
@@ -1030,5 +1034,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("api-provider-select").value = state.globals.selectedProvider;
   $("api-url-input").value = state.globals.cloudApiUrl;
   $("cloud-api-panel").classList.toggle("hidden", state.globals.selectedProvider !== "openai");
+  $("forget-api-key").addEventListener("click", async () => {
+    try { await window.__TAURI__.core.invoke("vault_delete"); sessionApiKey=""; $("api-key-input").value=""; $("remember-api-key").checked=false; $("vault-status").textContent="已忘记本机密钥。"; }
+    catch { $("vault-status").textContent="删除失败，请重试。"; }
+  });
+  $("api-url-input").addEventListener("input", () => {sessionApiKey=""; $("api-key-input").value=""; $("vault-status").textContent="地址已改变，请重新验证密钥。";});
+  try {
+    const key = await window.__TAURI__.core.invoke("vault_load", {baseUrl:state.globals.cloudApiUrl});
+    if (key) { sessionApiKey=key; $("api-key-input").value=key; $("remember-api-key").checked=true; $("vault-status").textContent="已读取本机加密密钥。"; }
+  } catch { $("vault-status").textContent="无法读取本机密钥，请重新输入。"; }
   renderReplyLengthSetting(); renderCharacterSelectors(); refreshModels();
 });

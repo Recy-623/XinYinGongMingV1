@@ -1,3 +1,4 @@
+mod vault;
 use rusqlite::{params, Connection};
 use serde_json::Value;
 use std::{
@@ -539,6 +540,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
+            vault::vault_save, vault::vault_load, vault::vault_delete,
             detect_wx_cli,
             detect_qq_exporter,
             wx_sessions,
